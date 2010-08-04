@@ -1,0 +1,281 @@
+=======================
+パート6: さらなる高みへ
+=======================
+
+みんなの詩
+----------
+
+詩のクライアントを大きく進歩させてきました。最新のバージョン (2.0) は Transports と Protocols、それに Protocol Factories という Twisted ネットワーキングの中でも核となる部分を使っています。しかし、またまだ改良の余地はあります。クライアント 2.0 (2.1 もそうです) はコマンドラインで詩をダウンロードすることにしか使えません。 ``PoetryClientFactory`` が詩を取得するだけでなく、それが終わったときにプログラムを終了させることも受け持っているからです。"``PoetryClientFactory``" と呼ばれるものには不釣り合いな仕事であり、 ``PoetryProtocol`` を生成してダウンロード済みの詩をまとめる以外の何事もすべきではありません。
+
+まずは、詩を要求するコードに詩を送る方法が必要です。同期プログラムでは、こんな感じの API にするでしょう。
+::
+
+    def get_poetry(host, post):
+        """Return the text of a poem from the poetry server at the given host and port."""
+
+しかし当然ではありますがこんな風にはできません。上の関数では詩を完全に受け取るまでブロックする必要性があります。でないとドキュメントで述べているようには動きません。とはいえこれは reactive プログラムです。ネットワークソケットにおけるブロッキングは問題とはなりませんので。私たちには、詩が転送されている間はブロッキングすることなく、詩の準備ができたら呼び出し元のコードに知らせる方法が必要です。これは Twisted 自身に持っていて欲しい類の問題です。Twisted は私たちのコードに次のタイミングで知らせる必要があります。ソケットが入出力の準備できたとき、もしくは何らかのデータを受信したとき、それともタイムアウトが発生したとき、などなどです。Twisted がコールバックを使ってこの問題を解決してくれることを見てきました。ですから、私たちだって同じようにコールバックを使えます。
+::
+
+    def get_poetry(host, port, callback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete.
+        """
+
+今は Twisted で使える非同期 API も手に入れましたので、先に進んでこれを実装してみましょう。
+
+    以前にも述べたように、私たちは時として、一般的な Twisted プログラマーはやらないような方法でコードを書いていきます。これはそんなものの一種です。
+    パート７と８で "Twisted なやり方" (なんと抽象化を使うのです！) での実装を見ることになります。しかし、簡単なことから始めると、完成形に対するより深い洞察を得られるでしょう。
+
+クライアント 3.0
+----------------
+バージョン 3.0 のクライアントは `twisted-client-3/get-poetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py>`_ にあります。このバージョンには ``get_poetry`` `関数 <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L77>`_ の実装があります。
+::
+
+    def get_poetry(host, port, callback):
+        from twisted.internet import reactor
+        factory = PoetryClientFactory(callback)
+        reactor.connectTCP(host, port, factory)
+
+ここで新しく着目する唯一のことは ``PoetryClientFactory`` にコールバック関数を渡していることです。 `ファクトリ <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L66>`_ は詩を提供するためにコールバックを使います。
+::
+
+    class PoetryClientFactory(ClientFactory):
+
+        protocol = PoetryProtocol
+
+        def __init__(self, callback):
+            self.callback = callback
+
+        def poem_finished(self, poem):
+            self.callback(poem)
+
+ファクトリは reactor を終了させる責任を負いませんので、バージョン 2.1 のものに比べてはるかに簡単になっていますね。接続に失敗したことを検知するコードもなくなっていますが、ちょっと手直しするつもりです。クライアントのバージョン 2.1 からその機能を再利用するだけですので、 ``PoetryProtocol`` 自身を変更する必要は全くありません。
+::
+
+    class PoetryProtocol(Protocol):
+
+        poem = ''
+
+        def dataReceived(self, data):
+            self.poem += data
+
+        def connectionLost(self, reason):
+            self.poemReceived(self.poem)
+
+        def poemReceived(self, poem):
+            self.factory.poem_finished(poem)
+
+この変更によって、 ``get_poetry`` 関数と ``PoetryClientFactory`` および ``PoetryProtocol`` クラスは完全に再利用可能なものになりました。詩をダウンロードするだけのものであり、他のことは何もしません。reactor を起動、終了させる全てのロジックは `main 関数 <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L90>`_ にあります。
+::
+
+    def poetry_main():
+        addresses = parse_args()
+
+        from twisted.internet import reactor
+
+        poems = []
+
+        def got_poem(poem):
+            poems.append(poem)
+            if len(poems) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            get_poetry(host, port, got_poem)
+
+        reactor.run()
+
+        for poem in poems:
+            print poem
+
+要求通りに、再利用可能な部品を手にすることができ、誰もが詩を取得するために使えるように共有モジュールに配置できますね (もちろん、Twisted を使っている限り、ですけど)。
+
+ところで、実際にクライアント 3.0 をテストしてみると、詩をより早く送信するようにしたり、より大きなデータの塊にして送信するなど、詩のサーバを再構成したくなるかもしれません。クライアントは余計な出力をしないようになりましたので、詩をダウンロードする間のことを監視してもそれほど興味深くはありません。
+
+議論
+---
+図１１のように、詩が提供される時点でのコールバックチェーンを視覚化できます。
+
+.. _figure11:
+
+.. figure:: images/p06_reactor-poem-callback.png
+
+    図１１：詩のコールバック
+
+図１１には説明の必要がありますね。これまでは、「自分たちのコード」を呼び出して終了するようにコールバックチェーンを説明してきました。しかし、Twisted を使うかシングルスレッドの reactive システムのプログラムを書くときは、これらのコールバックチェーンは他の部分のコードを呼び出させるようにして私たちのコードを取り込むかもしれません。言い換えると、reactive スタイルのプログラミングは、私たち自身が記述したコードに到達しても止まりません。reactor ベースのシステムではコールバックは進んでいくだけなのです。
+
+プロジェクトで Twisted を使うときにはこのことを念頭においてください。こう決心したときは、
+
+    Twisted を使うぞ！
+
+この決定もしたことになります。
+
+    reactor ループに基づいた一連の非同期コールバックチェーンの呼び出しとしてプログラムを構築していこう！
+
+別に声に出して宣言することでもありませんが、同じことです。それが Twisted のやり方ですから。
+
+たいていの Python プログラムは同期して動きますし、Python のモジュールもそうです。同期プログラムを書いていればすぐに次のことに気付きます。詩を受け取るために必要なのは、同期バージョンの ``get_poetry`` 関数に以下の数行のコードを追加して使うことでしょう。
+::
+
+    ...
+    import poetrylib # モジュールに名前を付けました (I just made this module name up)
+    poem = poetrylib.get_poetry(host, port)
+    ...
+
+それでは私たちのやり方を続けていきましょう。後になってもしも、実は詩を欲しくなんてなかった、と思ったらこの数行を取り除けばよいだけです。困ることもないでしょう。しかし、同期プログラムを書いていて ``get_poetry`` の Twisted バージョンを使うと決めたなら、プログラムをコールバックを使った非同期なスタイルで再構築しなくてはならなくなります。おそらくコードに大きな変更をしなくてはいけないでしょう。プログラムを書き直すような間違いが必要だと言っているわけではありません。要件が与えられれば意味のあることでしょう。しかし、 ``import`` の行といくつかの関数呼び出しを追加するほどには簡単ではないでしょう。同期と非同期のコードは混在させられません。
+
+Twisted と非同期プログラミングに慣れていないなら、既存のコードベースを移植する前にスクラッチから Twisted のプログラムをいくつか書いてみることをお勧めします。移植しながら一度に両方のモードで考えようとする余計な複雑さがなくなり、Twisted を使うことにも安心できるでしょう。
+
+    けれども、あなたのプログラムがすでに非同期なら、Twisted を使うことははるかに簡単かもしれません。
+    Twisted は比較的スムーズに `pyGTK <http://pygtk.org/>`_ と `pyQT <http://wiki.python.org/moin/PyQt>`_ に繋げられます。
+    これらは reactor ベースの GUI ツールキットのための Python API です。
+
+おかしくなってしまうとき
+------------------------
+クライアント 3.0 では、接続に失敗したことを検出しなくなりました。クライアント 1.0 で省略したときよりもいくぶんの問題を引き起こすようになりました。クライアント 3.0 に存在しないサーバから詩をダウンロードさせてみると、クラッシュすることなく永遠に待ち続けます。それでも ``clientConnectionFailed`` コールバックは呼び出されますので、基底クラス `ClientFactory <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L103>`_ にある標準実装は全く何もしません。このため、 ``get_poem`` コールバックが呼ばれることはありませんし、reactor は止まりません。<p02.html>パート２`_で作ったような何もしないプログラムになります。
+
+明らかにこのエラーをなんとかする必要があります。どこで？接続に失敗したという情報は ``clientConnectionFailed`` を介してファクトリ・オブジェクトにもたらされます。ということで、そこから始めることになります。しかし、このファクトリは再利用可能なものと考えられていますし、エラーを処理する適切な方法は、ファクトリが利用されるコンテキストに依存します。いくつかのアプリケーションでは、詩を見失ってしまうと甚大な被害になるかもしれません (詩が無いって？クラッシュみたいなものかもね)。他の場合では、そのまま動作を続けてどこか違うところからもう一つの詩を受け取るようにするかもしれません。
+
+言い換えると、 ``get_poetry`` のユーザは、正常に動いているときではなく、おかしくなってしまったときを知る必要があるのです。同期プログラムでは、 ``get_poetry`` が ``Exception`` を発生させ、呼び出すコードはそれを ``try/except`` 構文で処理できるようにするでしょう。しかし、reactive プログラムでは、エラー状態も非同期にもたらされます。 ``get_poetry`` 関数が処理を返す後まで、私たちは接続に失敗したことさえ分からないのです。
+
+一つの可能性を見せましょう。
+::
+
+    def get_poetry(host, port, callback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete. If there is a failure, invoke:
+
+          callback(None)
+
+        instead.
+        """
+
+コールバックの引数をテストする (つまり ``if poem is None`` ) ことによって、クライアントは私たちが詩を受け取ったかどうかを確定できます。クライアントが延々と実行し続けることは避けられますが、この方法にはまだいくつかの問題点があります。何よりもまず、失敗を示すのに ``None`` を使うのはその場しのぎ過ぎます。次に、 ``None`` という値では非常に限定された情報しか渡せません。何が悪かったのか分かりません。ここでは、デバッグに使えるようにトレースバック・オブジェクトを含めてあげましょう。では二つ目です。
+::
+
+    def get_poetry(host, port, callback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete. If there is a failure, invoke:
+
+          callback(err)
+
+        instead, where err is an Exception instance.
+        """
+
+``Exception`` を使うと同期プログラミングで使ったものに近くなりますね。これで何が悪かったかは例外を見ればよくなり、 ``None`` を通常の値としても使えるようになります。通常は、Python で例外に出会ったときはトレースバックも取得し、後でデバッグするために解析したりログに書き出したりします。トレースバックは本当に便利です。非同期プログラミングだからといって諦めるべきではありません。
+
+コールバックが呼び出された場所で出力するためにトレースバック・オブジェクトを必要としているわけではありませんよ。そこは問題が起こった場所ではありません。私たちが本当に欲しいのは、 ``Exception`` インスタンスとその例外が送出された場所からのコールバックの両方です (単に生成された場所ではなく、送出された場所です)。
+
+Twisted には ``Exception`` とトレースバックの両方を包括する `Failure <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L121>`_ という抽象化があります。 ``Failure`` の `docstring <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L141>`_ で作り方を説明しています。 ``Failure`` オブジェクトをコールバックに渡すことで、デバッグに便利なトレースバック情報を保存できます。
+
+`twisted-failure/failure-examples.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-failure/failure-examples.py>`_ には ``Failure`` オブジェクトを使うコード例がいくつかあります。これを見れば、 ``Failure`` が送出された例外からのトレースバック情報を保存する方法が分かるでしょう。たとえ ``except`` ブロックの外側のコンテキストだったとしてもです。 ``Failure`` インスタンスを作ることに多くを語る気はありません。パート７では、Twisted がそれを生成してくれるのが分かるでしょう。
+
+それでは三つ目です。
+::
+
+    def get_poetry(host, port, callback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete. If there is a failure, invoke:
+
+          callback(err)
+
+        instead, where err is a twisted.python.failure.Failure instance.
+        """
+
+このバージョンでは、うまく動かないときには ``Exception`` とトレースバックの両方を取得できます。いいですね！
+
+もう一息のところですが、もうひとつ問題点があります。通常の結果と失敗の両方に対して同じコールバックを使うのはちょっと変ですね。一般的に、失敗に対しては成功に対する場合と全く異なる対処が必要です。同期版の Python プログラムでは ``try/catch`` の中で成功と失敗を異なるコードで扱います。こんな風に。
+::
+
+    try:
+        attempt_to_do_something_with_poetry()
+    except RhymeSchemeViolation:
+        # the code path when things go wrong
+    else:
+        # the code path when things go so, so right baby
+
+エラー処理でこの形式を保ちたいなら、失敗に対しては分離したコードの進み方にさせる必要があります。非同期プログラミングでは、コードの進み方が分離されていることはコールバックが分離されていることを意味します。
+::
+
+    def get_poetry(host, port, callback, errback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete. If there is a failure, invoke:
+
+          errback(err)
+
+        instead, where err is a twisted.python.failure.Failure instance.
+        """
+
+クライアント 3.1
+----------------
+今度は妥当なエラー処理の意味を持つ API を使えますので、あとはそれを実装します。クライアント 3.1 は `twisted-client-3/get-poetry-1.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py>`_ にあります。変更点はここまでの内容そのままです。 `PoetryClientFactory <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L66>`_ は ``callback`` と ``errback`` の両方を受け取り、  ``clientConnectionFailed`` を実装します。
+::
+
+    class PoetryClientFactory(ClientFactory):
+
+        protocol = PoetryProtocol
+
+        def __init__(self, callback, errback):
+            self.callback = callback
+            self.errback = errback
+
+        def poem_finished(self, poem):
+            self.callback(poem)
+
+        def clientConnectionFailed(self, connector, reason):
+            self.errback(reason)
+
+`clientConnectionFailed <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L118>`_ は接続に失敗した理由を説明する ``Failure`` オブジェクト (``reason`` 引数) を受け取るようにすでになっていますので、 ``errback`` に渡すだけです。
+
+他の変更はすべて小さなものなので、ここでは示しません。クライアント 3.1 は次のようにサーバ名を付けずにポート番号を指定してテストできます。
+::
+
+    python twisted-client-3/get-poetry-1.py 10004
+
+次のような結果を目にするでしょう。
+::
+
+    Poem failed: [Failure instance: Traceback (failure with no frames): :
+     Connection was refused by other side: 111: Connection refused.]
+
+`poem_failed <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L110>`_ の ``print`` 文からの出力です。Twisted は ``Exception`` を送出するのではなく、単に渡すだけです。このため、ここではトレースバックはありません。しかし、巨大ではないからトレースバックは実際には必要とされません。Twisted は私たちに知らせてくれただけです。正確に、そのアドレスには接続できない、と
+
+まとめ
+------
+パート６で学んだのは次のことです。
+
+* Twisted プログラムのために書いた API は非同期でなくてはなりません。
+* 非同期なコードに同期のコードを混ぜることはできません。
+* したがって、私たち自身のコードでもコールバックを使わなくてはなりません。Twisted がそうしているように。
+* そして、エラーを処理するのもコールバックでなくてはなりません。
+
+Twisted を使って記述するどの API においても、追加で二つの引数、通常のコールバックとエラー用のコールバック、を含めなくてはならないのでしょうか？そんなに良いことには思えません。幸運にも Twisted は、私たちがどちらも使わなくても済み、おまけに追加でいくつかの機能を持たせてくれる抽象化を持ちます。これについては":doc:`p07`"で学んでいきましょう。
+
+
+おすすめの練習問題
+------------------
+#. 指定された時間が経過しても詩を受信しなければタイムアウトするようにクライアント 3.1 を修正しましょう。このような場合は独自の例外でエラー用コールバックを呼び出してください。接続を閉じるのも忘れないように。
+#. ``Failure`` オブジェクトの `trap <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L278>`_ メソッドを学習してください。
+   ``trap`` と ``try/except`` 文の ``except`` 節を比べてください。
+#. ``clientConnectionFailed`` は ``get_poetry`` が処理を返した後に呼ばれていることを検証するために ``print`` 文を使ってください。

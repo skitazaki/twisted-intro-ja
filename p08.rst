@@ -1,0 +1,181 @@
+========================
+パート8: Deferred で詩を
+========================
+
+クライアント 4.0
+----------------
+遅延オブジェクトに関することを学びましたので、これを使って Twisted の詩のクライアントを書き直してみましょう。クライアント 4.0 は `twisted-client-4/get-poetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py>`_ にあります。
+
+`get_poetry <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L83>`_ 関数は ``callback`` 引数も ``errback`` 引数も必要とはしません。代わりに、必要があればユーザーが複数のコールバックおよびエラー用コールバックを付け足せるように、新しい遅延オブジェクトを返します。
+::
+
+    def get_poetry(host, port):
+        """
+        Download a poem from the given host and port. This function
+        returns a Deferred which will be fired with the complete text of
+        the poem or a Failure if the poem could not be downloaded.
+        """
+        d = defer.Deferred()
+        from twisted.internet import reactor
+        factory = PoetryClientFactory(d)
+        reactor.connectTCP(host, port, factory)
+        return d
+
+新しい `factory <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L65>`_ オブジェクトは ``callback``/``errback`` のペアではなく遅延オブジェクトを伴って初期化されます。詩を受信するか、サーバーに接続できないことが判明すると、遅延オブジェクトは詩か ``failure`` を渡してコールバック・チェーンを開始させます。
+::
+
+    class PoetryClientFactory(ClientFactory):
+
+        protocol = PoetryProtocol
+
+        def __init__(self, deferred):
+            self.deferred = deferred
+
+        def poem_finished(self, poem):
+            if self.deferred is not None:
+                d, self.deferred = self.deferred, None
+                d.callback(poem)
+
+        def clientConnectionFailed(self, connector, reason):
+            if self.deferred is not None:
+                d, self.deferred = self.deferred, None
+                d.errback(reason)
+
+遅延オブジェクトが使われた後にそれへの参照を開放する方法に注意してください。Twisted のソースコードではよく見られるパターンで、同じ遅延オブジェクトを繰り返し作動させないようにします。Python のガベージ・コレクターにも分かりやすい方法です。
+
+繰り返しになりますが、 `PoetryProtocol <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L51>`_ を変更する必要はありません。そのままで十分です。残る作業は `poetry_main <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L96>`_ 関数を更新するだけです。
+::
+
+    def poetry_main():
+        addresses = parse_args()
+
+        from twisted.internet import reactor
+
+        poems = []
+        errors = []
+
+        def got_poem(poem):
+            poems.append(poem)
+
+        def poem_failed(err):
+            print >>sys.stderr, 'Poem failed:', err
+            errors.append(err)
+
+        def poem_done(_):
+            if len(poems) + len(errors) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            d = get_poetry(host, port)
+            d.addCallbacks(got_poem, poem_failed)
+            d.addBoth(poem_done)
+
+        reactor.run()
+
+        for poem in poems:
+            print poem
+
+最初のコールバックとエラー用コールバックから ``poem_done`` の呼び出しを取り除くようにリファクタリングできるように、遅延オブジェクトのチェーン化する機能を活用している方法に注目してください。
+
+Twisted のコードでは遅延オブジェクトはとてもたくさん使われますので、現在扱っている遅延オブジェクトを保持するためには一文字の局所変数 ``d`` を使う、という慣習があります。オブジェクトの属性のように、より長い期間保持するときは "``deferred``" という名前もよく使われます。
+
+議論
+----
+新しいクライアントを使うと、非同期版の ``get_poetry`` は同期版と同じだけの情報を受け付けます。詩のサーバのアドレスだけでよいのです。非同期版は遅延オブジェクトを返しますが、同期版は詩を返します。遅延オブジェクトを返すことは、Twisted の非同期 API と Twisted を使って書かれたプログラムの典型例であり、遅延オブジェクトの概念を明確にするためのもう一つの方法と言えます。
+
+    遅延オブジェクトは「非同期な結果」もしくは「まだ得られていない結果」を表します。
+
+図１３でこの二つのプログラミングスタイルを対比させてみます。
+
+.. _figure13:
+
+.. figure:: images/p08_sync-async.png
+
+    図１３：同期と非同期
+
+遅延オブジェクトを返すことによって、非同期 API は次のメッセージをユーザーに与えます。
+
+    自分は非同期な関数です。
+    私にやって欲しいことが何であれ終わってないかもしれません。
+    しかし、完了すると、その結果とともに遅延オブジェクトのコールバック・チェーンを開始させます。
+    一方で、何かおかしなことが起こったらエラー用コールバックのチェーンを開始させます。
+
+その関数自身が遅延オブジェクトを開始させるわけではありませんが、そのための遅延オブジェクトは既に返されているのです。むしろ、関数はイベントのチェーンをいつでも開始できる状態に設定したのです。
+
+遅延オブジェクトは、非同期モデルに必要なモノを用立てるために関数の結果の「時間をずらす (訳注：time-shifting)」方法です。関数によって返される遅延オブジェクトは、その関数が非同期であるという注意であり、来るべき結果の具体化されたものであり、その結果がいつかはもたらされるという約束になります。
+
+    同期関数が遅延オブジェクトを返すことも可能です。技術的には、遅延された戻り値はその関数が潜在的には非同期であることを意味します。先々のパートでは、同期関数が遅延オブジェクトを返す例を目にするでしょう。
+
+遅延オブジェクトの振る舞いはきちんと定義されており、よく知られています (Twisted での経験深いプログラマにとっては) ので、あなた自身の API が遅延オブジェクトを返すようにすると、他の Twisted プログラマがあなたのコードを理解して使うことが簡単になるでしょう。遅延オブジェクトがなかったとしたら、それぞれの Twisted プログラマ、もしくは全ての Twisted の内部コンポーネントは、コールバックを管理するために独自の方法を持つことになっていたでしょう。その方法は、それを利用するためにはあなたが学ばなくてはいけなかったものです。
+
+遅延オブジェクトを使っていれば、あなたはコールバックを使いますし、それらは reactor に呼ばれます
+-----------------------------------------------------------------------------------------------
+初めて Twisted を学ぶときによくある間違いとして、遅延オブジェクトにそれが持つ以上の機能を割り当てる、ということが挙げられます。特に、遅延オブジェクトのコールバック・チェーンに関数を追加したら、それは自動的に非同期になる、とよく誤解されます。たとえば、 ``addCallback`` で遅延オブジェクトを付け足すことで Twisted と一緒に ``os.system`` を使えるんじゃないか、といった具合にです。
+
+この間違いは最初に非同期モデルを学ぶことなく Twisted を学ぼうとすることに起因する問題だと私は思っています。典型的な Twisted のコードはたくさんの遅延オブジェクトを使い、ごくたまにしか reactor を参照しませんので、遅延オブジェクトがすべてを行っているかのように思えてしまいます。あなたがこのイントロダクションを最初から読んでくれているなら、そんな状況はほど遠いのではないでしょうか。Twisted は一緒に動作する多くの部分から構成されますが、非同期モデルを実装する一番の責任は reactor にあります。遅延オブジェクトは便利な抽象化ですが、理由が何であれそれらを使わずに Twisted を使ったクライアントのいくつかのバージョンを書いてきました。
+
+最初のコールバックが呼び出されたときにスタックトレースを見てみましょう。詩のサーバが動いているアドレスを指定して `twisted-client-4/get-poetry-stack.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry-stack.py>`_ にあるサンプルプログラムを実行してみてください。以下のような出力になるでしょう。
+::
+
+    File "twisted-client-4/get-poetry-stack.py", line 129, in
+        poetry_main()
+      File "twisted-client-4/get-poetry-stack.py", line 122, in poetry_main
+        reactor.run()
+
+      ... # some more Twisted function calls
+
+        protocol.connectionLost(reason)
+      File "twisted-client-4/get-poetry-stack.py", line 59, in connectionLost
+        self.poemReceived(self.poem)
+      File "twisted-client-4/get-poetry-stack.py", line 62, in poemReceived
+        self.factory.poem_finished(poem)
+      File "twisted-client-4/get-poetry-stack.py", line 75, in poem_finished
+        d.callback(poem) # here's where we fire the deferred
+
+      ... # some more methods on Deferreds
+
+      File "twisted-client-4/get-poetry-stack.py", line 105, in got_poem
+        traceback.print_stack()
+
+クライアント 2.0 によって生成されたスタックトレースにそっくりですね。トレースの様子を図示すると図１４のようになります。
+
+.. _figure14:
+
+.. figure:: images/p08_reactor-deferred-callback.png
+
+    図１４：遅延オブジェクトを持つコールバック
+
+ひとつ前の Twisted クライアントに似ています。図で表現してみるといくらか不穏に感じ始めるかもしれませんが。残念ながらこれ以上のことは見せられません。ある欠点が図に反映されていません。遅延オブジェクト内で二つ目のコールバックが呼び出されるまで、上記のコールバック・チェーンは reactor に制御を返しません。これは最初のコールバック (``got_poem``) が値を返した後に起こることです。
+
+    新しいスタックトレースにはもうひとつの違いがあります。 "私たちのコード"  と "Twisted のコード" を分けている行はいくらか曖昧です。
+    遅延オブジェクトにおけるメソッドは真に Twisted のコードだからです。
+    コールバック・チェーン内で Twisted のコードとユーザのコードが混ぜこぜになることは、大規模な Twisted プログラムではよくあることです。
+    これで他の Twisted による抽象化を広範囲に渡って使用できます。
+
+遅延オブジェクトを使うことで、コールバック・チェーンにおいて Twisted で reactor を開始させるいくつかのステップを追加しました。しかし、非同期モデルの基本的な機構は変更していません。コールバックを使うプログラミングに関するこれらの事実を思い出してください。
+
+#. 一度にひとつのコールバックしか動きません
+#. reactor が動いているときは、私たちのコールバックは動いていません
+#. 逆もまた然りです
+#. コールバックがブロックしてしまったら、プログラム全体がブロックしてしまいます
+
+どのような方法であれ、コールバックを遅延オブジェクトに追加してもこれらの事柄を変更しません。特に、ブロックしてしまうコールバックは遅延オブジェクトに紐づいても依然としてブロックします。このため、遅延オブジェクトが実行されたとき (``d.callback``) にブロックしてしてしまい、Twisted がブロックしてしまうことになります。次のように結論付けられます。
+
+    遅延オブジェクトはコールバックを管理する問題に対する解決策です (Twisted の開発者が編み出した方法です)。
+    コールバックを避ける方法でもありませんし、ブロックしてしまうコールバックをノンブロッキングなものに変換する方法でもありません。
+
+最後の点は、ブロックするコールバックを使って遅延オブジェクトを構築することで確認できます。 `twisted-deferred/defer-block.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-block.py>`_ にあるコード例を確認してください。ふたつ目のコールバックは ``time.sleep`` 関数を使ってブロックしています。このスクリプトを実行させて ``print`` 文の順序をよく見てみると、ブロッキング・コールバックは遅延オブジェクトの中でもブロックしてしまうことが明らかになるでしょう。
+
+まとめ
+------
+``Deferred`` を返すことで、関数はユーザーに「自分は非同期です」と伝えて、結果が到着したときにそれを非同期に獲得するための機構 (コールバックとエラー用コールバックをここで追加！) を提供します。遅延オブジェクトは Twisted のコードベースでは広くどこでも使われています。Twisted の API を探検してみるとどこを向いてもそれらに直面するでしょう。このため、遅延オブジェクトに親しんで使うことが心地よくなっていくことは、やるべき価値のあることです。
+
+クライアント 4.0 は、真に "Twisted style" で書かれた Twisted を使う詩のクライアントとしては最初のバージョンです。非同期な関数呼び出しの戻り値として遅延オブジェクトを使うのです。もう少し明確にするために使えた Twisted の API もいくつかありますが、いかにシンプルに Twisted のプログラムが書けるかを示すにはとても良い例だと思っています。少なくともクライアント・サイドにおいては。これからは、詩のサーバーも Twisted を使って書き直していくことになるでしょう。
+
+しかし、遅延オブジェクトに関して十分とも言えません。比較的小さなコード片にしては、 ``Deferred`` クラスは驚くべきほどたくさんの機能を提供してくれます。より多くの機能、そしてその動機に関しては、":doc:`p09`"で検討していきましょう。
+
+おすすめの練習問題
+------------------
+#. クライアント 4.0 を次のように更新してみてください。指定時間が経過しても詩を受信しなかった場合にタイムアウトするように。そしてその場合に、独自の例外と一緒にエラー用コールバックを作動させてください。これをやるときに、接続を閉じることを忘れないでくださいね。
+#. クライアント 4.0 を次のように更新してみてください。詩のダウンロードに失敗したら、ユーザーがどのサーバが問題の原因なのかを判別できるよう適切なサーバのアドレスを出力するように。コールバックとエラー用コールバックを付け足すときは追加引数 (positional-arguments でも keywork-arguments でも) を受け取れることを `忘れない <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L172>`_ でください。

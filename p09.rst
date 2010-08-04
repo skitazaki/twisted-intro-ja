@@ -1,0 +1,42 @@
+========================
+パート9: Deferred 再入門
+========================
+
+はじめに
+--------
+
+.. _figure15:
+
+.. figure:: images/p09_async-exceptions4.png
+
+    図１５：同期コードと例外
+
+.. _figure16:
+
+.. figure:: images/p09_deferred-2.png
+
+    図１６：非同期コールバックと例外
+
+.. _figure17:
+
+.. figure:: images/p09_deferred-31.png
+
+    図１７：遅延オブジェクト内の制御の流れ
+
+.. _figure18:
+
+.. figure:: images/p09_sync-exceptions1.png
+
+    図１８：遅延オブジェクトが着火させる可能性のあるパターン
+
+
+まとめ
+------
+
+":doc:`p10`"
+
+おすすめの練習問題
+------------------
+*
+*
+*

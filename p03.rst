@@ -1,0 +1,240 @@
+=============================
+パート3: 目を向けてみましょう
+=============================
+
+何もしない、Twisted なやり方
+----------------------------
+それでは、Twisted を使って非同期に詩を取得するクライアントを再実装していきましょう。とその前に、雰囲気をつかむために本当に単純な Twisted のプログラムを書いてみましょう。パート２で述べたように、紹介するコード例は Twisted 8.2.0 を使って開発しました。Twisted の API は変わっていくものですが、使おうとしている中心的な API はなかなか変わらないでしょう。例え変わったとしても、ここで紹介するコード例は将来のリリースでも動くと思います。Twisted をインストールしていなければ、 `ここ <http://twistedmatrix.com/trac/wiki/Downloads>`_ から入手してください。
+
+もっとも単純な Twisted のプログラムを以下に示します。 ``twisted-intro`` の一番上のディレクトリから見て `basic-twisted/simple.py <http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/simple.py>`_ にあります。
+::
+
+    from twisted.internet import reactor
+    reactor.run()
+
+次のようにして実行できます。
+::
+
+    python basic-twisted/simple.py
+
+":doc:`p02`"でみたように、Twisted は `Reactor Pattern <http://en.wikipedia.org/wiki/Reactor_pattern>`_ の実装であり、reactor もしくはイベントループを表すオブジェクトを持ちます。これはすべての Twisted プログラムで核となるものです、一番最初の行で ``reactor`` オブジェクトを使えるようにし、二行目で reactor にループを開始するように伝えます。
+
+このプログラムは何もしないで居座っているだけです。 ``Control-C`` を押すと止められますが、そうしなければ延々と実行を続けるでしょう。普通は入出力を監視したいひとつ以上のファイルディスクリプタ (詩のサーバにつないであると考えてください) をループに与えます。その方法は後で見ていくとして、ここでは reactor ループをそのままでにしておきます。繰り返しを続ける `busy loop <http://en.wikipedia.org/wiki/Busy_waiting>`_ ではないことに注意してください。CPU の動作状況を表示できるようなら、技術的には無限ループによって発生するスパイク現象が起きていないことが分かるでしょう。実際、ここで示したプログラムはまったく CPU を使っていません。その代わりに、reactor は":ref:`figure5`"における上部分のサイクルに留まっています。決して発生することのないイベントを待ちながら、です。(厳密に言えば、存在しないファイルディスクリプタに対する ``select`` 呼び出しを待っています)
+
+Hamletian inaction のメタファーを想起させるかもしれませんが、未だにどうしようもなくかわいらしいプログラムです。もっとおもしろいものにしていきたいところですが、すでにいくつか分かったことがあります。
+
+#. Twisted の reactor ループは指示が与えられるまで開始しません。 ``reactor.run()`` を呼び出すことで開始させます。
+#. reactor ループは開始されたのと同じスレッドで実行されます。ここでの場合、main スレッド (しかもここだけ) で実行されます。
+#. いったんループが開始すると、そのまま動き続けます。reactor はプログラム (もしくは開始された特定のスレッド) の「支配下」にあります。
+#. 何もすることがなければ、reactor ループは CPU を消費しません。
+#. reactor は明示的に作られません。import するだけです。
+
+最後の点は詳しく説明する価値があります。Twisted では、reactor は基本的に `シングルトン <http://en.wikipedia.org/wiki/Singleton_pattern>`_ です。唯一の reactor オブジェクトしかなく、import したときに暗黙的に作成されます。 ``twisted.internet`` パッケージの ``reactor`` モジュールを見てみると、とても小さなコードを確認できるでしょう。実際の実装は他のファイル (`twisted.internet.selectreactor <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/selectreactor.py>`_) にあります。
+
+実は、Twisted には複数の reactor の実装があります。パート２で紹介したように、 ``select`` の呼び出しはファイルディスクリプタを待ち受けるひとつの方法に過ぎません。Twisted が使うデフォルトの実装ではありますが、他の方法を使う reactor を有効にすることもできます。例えば `twisted.internet.pollreactor <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/pollreactor.py>`_ は ``select`` ではなく ``poll`` システムコールを使います。
+
+異なる reactor の実装を使うためには、 ``twisted.internet.reactor`` を有効にする前に ``install`` しておきます。 ``pollreactor`` をインストールするには次のようにします。
+::
+
+    from twisted.internet import pollreactor
+    pollreactor.install()
+
+
+特定の reactor の実装を最初にインストールしないで ``twisted.internet.reactor`` を import すると、Twisted は ``selectreactor`` をインストールするでしょう。このため、誤ってデフォルトの reactor をインストールしてしまうことを避けるため、モジュールの最上位で reactor をインポートしないのが一般的なやり方です。そうではなく、使うのと同じスコープで reactor を import します。
+
+    執筆時点では、Twisted は複数の reactor が共存することを許すようなアーキテクチャに徐々に移行しています。
+    この考え方においては、reactor オブジェクトはモジュールから import されるのではなく、参照で渡されるようになるでしょう。
+
+それでは ``pollreactor`` を使って最初の Twisted プログラムを再実装できますね。 `basic-twisted/simple-poll.py <http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/simple-poll.py>`_ を見てください。
+::
+
+    from twisted.internet import pollreactor
+    pollreactor.install()
+
+    from twisted.internet import reactor
+    reactor.run()
+
+何もしない ``select`` ループの代わりに何もしない ``poll`` ループを使うようになった、ということです。かっこいい！
+
+この入門の以降の部分ではデフォルトの reactor を使うことにします。Twisted を学ぶという目的においては、どの reactor でも同じことです。
+
+こんにちは Twisted
+------------------
+とりあえず何かする Twisted プログラムを作ってみましょう。端末にメッセージを表示するものは次のようになります。もちろん reactor ループが開始された後に、です。
+::
+
+    def hello():
+        print 'Hello from the reactor loop!'
+        print 'Lately I feel like I\'m stuck in a rut.'
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(hello)
+
+    print 'Starting the reactor.'
+    reactor.run()
+
+このプログラムは `basic-twisted/hello.py <http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/hello.py>`_ に置いてあります。実行してみると次の出力を得られるでしょう。
+::
+
+    Starting the reactor.
+    Hello from the reactor loop!
+    Lately I feel like I'm stuck in a rut.
+
+プログラムは、画面に出力したあとも動作を続けますので、手動で停止させなくてはなりません。
+
+``hello`` 関数は reactor が動き始めた後に呼ばれることに注意してください。Twisted のコードが私たちのコードを呼び出さなくてはいけませんので、reactor そのものに呼び出されるということです。Twisted に呼び出して欲しい関数への参照を reactor メソッド ``callWhenRunning`` に渡すことで、動作を変更できます。もちろん、reactor を動かす前にやらなくてはいけません。
+
+``hello`` 関数への参照にはコールバック (*callback*) という用語を使います。コールバックは Twisted が適当なときに後で呼び出す ("call us back") ように Twisted (もしくは他のフレームワークでも) に与える関数への参照です。この場合は reactor ループが開始した直後です。Twisted のループは私たちが記述するコードとは分離されていますので、reactor の中心となる部分とビジネスロジックの部分のやり取りのほとんどは、様々な API を使って Twisted に与えたコールバック関数から始まります。
+
+次のプログラムで、Twisted が私たちが記述するコードを呼び出す様子を確認できます。
+::
+
+    import traceback
+
+    def stack():
+        print 'The python stack:'
+        traceback.print_stack()
+
+    from twisted.internet import reactor
+    reactor.callWhenRunning(stack)
+    reactor.run()
+
+このコードは `basic-twisted/stack.py <http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/stack.py>`_ にあり、次のような出力を表示します。
+::
+
+    The python stack:
+    ...
+      reactor.run() <-- This is where we called the reactor
+    ...
+    ...  <-- A bunch of Twisted function calls
+    ...
+      traceback.print_stack() <-- The second line in the stack function
+
+途中の全ての Twisted の呼び出しを気にすることはありません。 ``reactor.run()`` と私たちが渡したコールバックの関係にだけ気をつけてください。
+
+    *コールバックとはどのように向き合うべきでしょうか？*
+    Twisted だけがコールバックを使う reactor フレームワークというわけではありません。
+    もっとも古い Python の非同期フレームワークである `Medusa <http://www.nightmare.com/medusa/>`_ と `asyncore <http://docs.python.org/library/asyncore.html#module-asyncore>`_ もコールバックを使います。 
+    たくさんの GUI フレームワークのように、GUI ツールキットである `GTK <http://gtk.org/>`_ と `QT <http://qt.nokia.com/>`_ も reactor ループ上で動きます。
+
+reactive system の開発者は間違いなくコールバックが好きです。たぶん結婚すべきでしょうし、すでにそうしているかもしれませんね。しかし、次のことを頭に入れておいてください。
+
+#. reactor パターンはシングルスレッドです。
+#. Twisted のような reactive フレームワークは、私たちが独自に実装しなくてもよいように reactor ループを実装しています。
+#. 私たちのコードはビジネスロジックを実装して呼ばれるようにします。
+#. シングルスレッドの制御下にありますので、reactor ループは私たちのコードを呼び出さなくてはいけなくなるでしょう。
+#. reactor には、私たちのコードのどの部分が呼び出されるべきかを前もって知る術はありません。
+
+このような状況ではコールバックは単なるオプションではありません。実際にできることといったらこれだけです。
+
+図６はコールバックの最中に何が起こっているかを表しています。
+
+.. _figure6:
+
+.. figure:: images/p03_reactor-callback.png
+
+    図６：reactor がコールバックを扱う様子
+
+
+図６はコールバックのいくつかの重要な性質を描き出しています。
+
+#. 私たちのコールバックのコードは Twisted のループと同じスレッドで動きます。
+#. コールバックが動いているとき、Twisted のループは動いていません。
+#. 逆もまた然りです。
+#. コールバックが処理を戻すと reactor ループは再開します。
+
+コールバックの間、Twisted のループは私たちのコード上で結果的にブロックされます。このため、コールバックのコードがいかなる時間も無駄にしないようにしなくてはいけないでしょう。特に、入出力を待つような呼び出し (blocking I/O calls) は避けるべきでしょう。さもなければ、reactor パターンを使っている全ての部分で思わぬ性能の劣化を招いてしまうでしょう。Twisted は私たちのコードがブロックしないように特別な事前注意を促さないでしょうから、私たち自身が確実に注意を払わなくてはいけません。これから時々出会わすように、一般的なネットワークを介した入出力では Twisted に非同期通信をやらせるので、私たちがその難しさを気にする必要はありません。
+
+潜在的にブロッキングする操作の他の例としては、ソケットではないファイルディスクリプタ (パイプなど) からの読み書きや、サブプロセスが完了するのを待つことがあります。ブロッキングからノンブロッキング操作に切り替える方法は、何をしているか次第ではありますが、Twisted の API がその助けになることもしばしばあります。なお、多くの Python 標準関数にはノンブロッキングモードに切り替える方法はありません。例えば、 ``os.system`` 関数はサブプロセスが完了するまで常にブロックします。まさに動作している通りです。Twisted を使う上では、 サブプロセスを立ち上げるためには Twisted API のやり方で ``os.system`` を避けるようにしなくてはいけません。
+
+さよなら Twisted
+----------------
+reactor の ``stop`` メソッドを使って Twisted の reactor に止まってもらいましょう。しかし、いったん停止した reactor は再起動できませんので、一般的には、プログラムが処理を終了するときにのみそうするべきでしょう。
+
+    Twisted のメーリングリストで、自由に開始や停止できるように reactor を再起動可能にすべきか、という議論がありました。しかし、バージョン 8.2.0 の時点では reactor を開始 (したがって停止も) できるのは一回きりです。
+
+これがそのプログラムです。 `basic-twisted/countdown.py <http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/countdown.py>`_ にあります。このプログラムは 5 秒間のカウントダウン後に reactor を止めます。
+::
+
+    class Countdown(object):
+
+        counter = 5
+
+        def count(self):
+            from twisted.internet import reactor
+            if self.counter == 0:
+                reactor.stop()
+            else:
+                print self.counter, '...'
+                self.counter -= 1
+                reactor.callLater(1, self.count)
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(Countdown().count)
+
+    print 'Start!'
+    reactor.run()
+    print 'Stop!'
+
+Twisted にコールバックを登録するのに ``callLater`` API を使っています。 ``callLater`` ではコールバック関数は第二引数で、第一引数はコールバックを実行してほしいときまでの秒数です。秒数には浮動小数も使えます。
+
+では、Twisted は正確な時間にコールバックを実行するためにどのようにしているのでしょうか？プログラムはファイルディスクリプタを listen していないのに、どうして ``select`` ループなどのように待ち続けるのでしょう？``select`` の呼び出し、他の類似のものでもそうですが、は<i>タイムアウト</i>の値も受け付けます。タイムアウト値が与えられてその時間内に入出力の準備ができたファイルディスクリプタが何もない場合は、 ``select`` の呼び出しはとにかく処理を戻すでしょう。ついでながら、タイムアウト値にゼロを渡すことで、全くブロックすることなくファイルディスクリプタの集合を素早く確認 (もしくは「ポール」) できます。
+
+タイムアウトを、":ref:`figure5`"のイベントループが待ち受けるもう一種のイベントととらえることもできます。そして、Twisted は ``callLater`` で登録されたあらゆる「時間指定されたコールバック」(timed callbacks) が間違いなくその時に呼び出されるように、タイムアウトを使います。もしくは、ほぼ時間通り、とも言えます。もしも他のコールバックが本当に長時間の実行になってしまうと、時間指定されたコールバックは予定された時間より遅れてしまうかもしれません。Twisted の ``callLater`` 機構は `ハードリアルタイム <http://en.wikipedia.org/wiki/Real-time_computing#Hard_and_soft_real-time_systems>`_ システムに要求されるような類の保証を提供できません。
+
+上記のカウントダウンプログラムの出力は次のようになります。
+::
+
+    Start!
+    5 ...
+    4 ...
+    3 ...
+    2 ...
+    1 ...
+    Stop!
+
+最後の「Stop!」の行は reactor が処理を終了したときに表示され、 ``reactor.run()`` は制御を戻すことに気をつけてください。これで、自分自身で停止できるプログラムができましたね。
+
+任せたよ Twisted
+------------------
+Twisted はコールバックという形で私たちのコードを呼び出して終了することがしばしばありますので、コールバックが例外を発生させたときに何が起こるかを不思議に思うかもしれません。やってみましょう。 `basic-twisted/exception.py <http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/exception.py>`_ のプログラムはあるコールバックの中で例外を発生させますが、他のコールバックは普通に動きます。
+::
+
+    def falldown():
+        raise Exception('I fall down.')
+
+    def upagain():
+        print 'But I get up again.'
+        reactor.stop()
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(falldown)
+    reactor.callWhenRunning(upagain)
+
+    print 'Starting the reactor.'
+    reactor.run()
+
+コマンドラインから実行してみると、次のような感じの出力になるでしょう。
+::
+
+    Starting the reactor.
+    Traceback (most recent call last):
+      ... # I removed most of the traceback
+    exceptions.Exception: I fall down.
+    But I get up again.
+
+最初のコールバックが発生させた例外のトレースバックが見えますが、二番目のコールバックは最初のもののあとに実行されていることに気をつけてください。 ``reactor.stop()`` をコメントアウトするとプログラムは永遠に実行し続けるでしょう。コールバックが失敗したとき (例外を報告するでしょうが) でさえ reactor は動き続けるのです。
+
+ネットワークサーバは一般的に非常に堅牢なソフトウェアの集まりであることが肝心です。いかなる不規則なバグが頭をもたげてこようとも、クラッシュすべきではありません。私たち自身のエラーを扱うときに嫌々ながらやるべきと言っているのではなく、Twisted が知らせてくれるということを頭に入れておけば良いのです。
+
+詩をお願い
+----------------
+これで Twisted を使っていくつかの詩を扱う準備が整いました。":doc:`p04`"では、非同期に詩を取得するクライアントの Twisted 版を実装しましょう。
+
+おすすめの練習問題
+------------------
+#. ``countdown.py`` プログラムを、三つの独立したカウンターが異なる比率で動くようにしてみましょう。全てのカウンターが完了したら reactor を止めてください。
+#. `twisted.internet.task <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/task.py>`_ の ``LoopingCall`` クラスを見てください。 `LoopingCall <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/task.py#L23>`_ を使って上記のカウントダウンプログラムを書き直してください。 ``start`` と ``stop`` メソッドを使うだけで構いませんし、「遅延された」(deferred) 戻り値を使う必要はありません。遅延された値が何であるかは、この後のパートで学習することになります。

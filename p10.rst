@@ -1,0 +1,60 @@
+======================
+パート10: 変換された詩
+======================
+
+はじめに
+--------
+
+.. _figure19:
+
+.. figure:: images/p10_deferred-5.png
+
+    図１９：クライアント 5.0 における遅延オブジェクトの連鎖
+
+.. _figure20:
+
+.. figure:: images/p10_deferred-6.png
+
+    図２０：詩をダウンロードして正確に変換するとき
+
+.. _figure21:
+
+.. figure:: images/p10_deferred-7.png
+
+    図２１：詩をダウンロードして GibberishError が出るとき
+
+.. _figure22:
+
+.. figure:: images/p10_deferred-8.png
+
+    図２２：詩をダウンロードして失敗するとき
+
+.. _figure23:
+
+.. figure:: images/p10_deferred-9.png
+
+    図２３：サーバに接続できないとき
+
+.. _figure24:
+
+.. figure:: images/p10_deferred-10.png
+
+    図２４：クライアント 5.1 における遅延オブジェクトの連鎖
+
+.. _figure25:
+
+.. figure:: images/p10_deferred-42.png
+
+    図２５：CannotCummigsify エラーが発生するとき
+
+
+まとめ
+------
+
+":doc:`p11`"
+
+おすすめの練習問題
+------------------
+*
+*
+*
