@@ -2,59 +2,265 @@
 パート10: 変換された詩
 ======================
 
-はじめに
---------
+クライアント 5.0
+----------------
+それでは、":doc:`p09`" で提案してきたような方向性で、これまで作ってきた詩のクライアントにいくつかの変換ロジックを付け足していきましょう。
+しかしまずは、恥ずかしながら告白しておくことがあります。
+私は Byronification Engine を記述する術を知りません。
+これは私のプログラミングスキルの範疇を超えています。
+代わりに、Cummingsifier という、もう少し簡単な変換を実装していくことにしましょう。
+Cummingsifier は、詩を受け取って、元の詩に似てはいるものの `e.e.cummings`_ 形式で書かれた新しい詩を返すアルゴリズムです。
+Cummingsifier アルゴリズムの全てをここに示しましょう。
+
+.. _e.e.cummings: http://en.wikipedia.org/wiki/E._E._Cummings
+
+::
+
+    def cummingsify(poem):
+        return poem.lower()
+
+不幸なことに、このアルゴリズムはとても簡単なので決して失敗することがありません。
+そこでクライアント 5.0 (`twisted-client-5/get-poetry.py`_ にあります) では、次のうちのいずれかを無作為に実行するように ``cummingsify`` を少し変更したバージョンを使うことにします。
+
+.. _twisted-client-5/get-poetry.py: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry.py#L1
+
+#. cummingsified されたバージョンの詩を返します。
+#. ``GibberishError`` を送出します。
+#. ``ValueError`` を送出します。
+
+このようにして、予期せぬ方法で時々失敗するアルゴリズムをシミュレートします。
+
+クライアント 5.0 におけるその他の違いは `poetry_main`_ 関数にのみあります。
+
+.. _poetry main: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry.py#L119
+
+::
+
+    def poetry_main():
+        addresses = parse_args()
+
+        from twisted.internet import reactor
+
+        poems = []
+        errors = []
+
+        def try_to_cummingsify(poem):
+            try:
+                return cummingsify(poem)
+            except GibberishError:
+                raise
+            except:
+                print 'Cummingsify failed!'
+                return poem
+
+        def got_poem(poem):
+            print poem
+            poems.append(poem)
+
+        def poem_failed(err):
+            print >>sys.stderr, 'The poem download failed.'
+            errors.append(err)
+
+        def poem_done(_):
+            if len(poems) + len(errors) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            d = get_poetry(host, port)
+            d.addCallback(try_to_cummingsify)
+            d.addCallbacks(got_poem, poem_failed)
+            d.addBoth(poem_done)
+
+        reactor.run()
+
+プログラムがサーバから詩をダウンロードすると、次のいずれかが起こります。
+
+#. cummingsified バージョン (小文字に変換されたもの) の詩を出力します。
+#. 元々の詩の後に "Cummingsify failed!" と出力します。
+#. "The poem download failed." と出力します。
+
+私たちは複数のサーバからダウンロードできるようになりましたが、三つの異なる結果を全て見るまで、クライアント 5.0 をテストしてみるときはひとつのサーバを使ってプログラムを何度も実行するだけの方が簡単でしょう。
+また、サーバが存在しないポートに対してクライアントを実行させてみてください。
+
+``get_poetry`` から得られたそれぞれの ``Deferred`` に付け足したコールバックとエラー用コールバックのチェーンを図にしてみましょう。
 
 .. _figure19:
 
-.. figure:: images/p10_deferred-5.png
+.. figure:: images/p10_deferred-42.png
 
     図１９：クライアント 5.0 における遅延オブジェクトの連鎖
 
+``addCallback`` によって付け加えられた何もしないエラー用コールバック (pass-through errback) に注意してください。
+これは、受け取った ``Failure`` が何であろうとも次のエラー用コールバック (``poem_failed``) にそれを渡します。
+このため `poem_failed`` は、 ``get_poetry`` (つまり、遅延オブジェクトは ``errback`` メソッドで発火させられます) と ``cummingsify`` 関数の両方から投げられたエラーを扱うことができます。
+
+図19 において
+Inkscape_
+
+.. _Inkscape: http://inkscape.org/
+
+``cummingsify`` 関数がきちんと動くのは図20に示します。
+
 .. _figure20:
 
-.. figure:: images/p10_deferred-6.png
+.. figure:: images/p10_deferred-5.png
 
     図２０：詩をダウンロードして正確に変換するとき
 
+図21は、詩を受信したものの ``cummingsify`` が ``GibberishError`` を送出する場合を表します。
+
 .. _figure21:
 
-.. figure:: images/p10_deferred-7.png
+.. figure:: images/p10_deferred-6.png
 
     図２１：詩をダウンロードして GibberishError が出るとき
 
+``try_to_cummingsify`` コールバックは ``GibberishError`` を再度発生させますので、制御がエラー用コールバックに移り ``poem_failed`` は引数として例外を受け取って呼び出されます。(その引数はもちろん ``Failure`` でラップされています)
+
+そして ``poem_failed`` は 例外を発生させないかあるいは ``Failure`` を返しますので、呼び出し終えると制御は通常のコールバックに戻ります。
+もしも ``poem_failed`` にエラーを完全に処理して欲しければ、 ``None`` を返すことが妥当な振る舞いです。
+そうではなく ``poem_failed`` に何かをやってほしければ、しかしそれでもなおエラーを受け渡しながらであれば、 ``poem_failed`` がその ``err`` 引数を返し、処理はエラー用コールバックにいくでしょう。
+
+今のコードでは ``got_poem`` と ``poem_failed`` のどちらも失敗しないことに気をつけてください。このため ``poem_done`` というエラー用コールバックは決して呼び出されません。
+しかし、いかなる場合でもこの段階を踏むことは安全であり、 ``got_poem`` か ``poem_failed`` のどちらかに私たちが知らないバグがあるかもしれませんので、防御的プログラミング ("defensive" programming) を体現します。
+``addBoth`` メソッドは、遅延オブジェクトをどのように発火しようとも特定の関数が実行されることを保証しますので、 ``addBoth`` を使うことは  ``try/except`` 文に ``finally`` 句を追加することに相当します。
+
+ここでは、詩をダウンロードして ``cummingsify`` 関数が ``ValueError`` を発生させる場合を検証しましょう。図22に示します。
+
 .. _figure22:
 
-.. figure:: images/p10_deferred-8.png
+.. figure:: images/p10_deferred-7.png
 
-    図２２：詩をダウンロードして失敗するとき
+    図２２：詩をダウンロードして、cummingsify に失敗するとき
+
+``got_poem`` が変換されていない元のバージョンの詩を受け取る、ということを除いて、これは図20と同じです。
+この切り替えはすべて ``try_to_cummingsify`` コールバックの中で発生します。このコールバックは普通の ``try/except`` 文で ``ValueError`` を捕まえて、その代わりに元の詩を返します。
+遅延オブジェクトがエラーを見ることはありません。
+
+最後に図23で、存在しないサーバから詩をダウンロードしようとした場合を示します。
 
 .. _figure23:
 
-.. figure:: images/p10_deferred-9.png
+.. figure:: images/p10_deferred-8.png
 
     図２３：サーバに接続できないとき
 
+前回と同じように、その後の制御が通常のコールバックに戻るように ``poem_failed`` は ``None`` を返します。
+
+クライアント 5.1
+----------------
+クライアント 5.0 では、遅延オブジェクトに最初に例外を捕まえさせるよりはむしろ、通常の ``try/except`` 文を使って ``try_to_cummingsify`` コールバックの ``cummingsify`` で例外を引っ掛けます。
+この戦略に特に悪いところはありませんが、違う方法でどうやってみるかを考えることは勉強になるでしょう。
+
+遅延オブジェクトに ``GibberishError`` と ``ValueError`` の両方の例外を捕まえさせて、それらをエラー用コールバックの流れに送る場合を考えてみましょう。
+現在の振る舞いをそのままにするために、後続するエラー用コールバックはエラーが ``ValueError`` かを確認する必要があり、もしそうなら、制御が通常のコールバックの流れに復帰して元の詩が出力されるように、そのままの詩を返すようさせます。
+
+しかし、問題がひとつあります。エラー用コールバックは元の詩を取得できません。 ``cummingsify`` 関数から送出され ``Failure`` でラップされた ``ValueError`` を受け取るのです。
+エラー用コールバックにエラーを処理させるために、このコールバックが元の詩を受け取るように工夫する必要があります。
+
+ひとつの方法は、元の詩が例外に含まれるよう ``cummingsify`` 関数を変更することです。
+これこそがクライアント 5.1 で実現したことで、 `twisted-client-5/get-poetry-1.py`_ にあります。
+``ValueError`` 例外を、第一引数で元の詩を受け取る独自の ``CannotCummingsify`` 例外に変更しました。
+
+.. _twisted-client-5/get-poetry-1.py: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L1
+
+もしも ``cummingsify`` が外部モジュールに実在する関数ならば、 ``GibberishError`` ではないすべての例外を引っ掛けて、代わりに ``CannotCummingsify`` 例外を発生させるようなもうひとつの関数でラップしてしまうことがおそらく最良の方法でしょう。 
+この新しい方法を使うと `poetry_main`_ 関数は次のようになります。
+
+.. _poetry_main: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L122
+
+::
+
+    def poetry_main():
+        addresses = parse_args()
+
+        from twisted.internet import reactor
+
+        poems = []
+        errors = []
+
+        def cummingsify_failed(err):
+            if err.check(CannotCummingsify):
+                print 'Cummingsify failed!'
+                return err.value.args[0]
+            return err
+
+        def got_poem(poem):
+            print poem
+            poems.append(poem)
+
+        def poem_failed(err):
+            print >>sys.stderr, 'The poem download failed.'
+            errors.append(err)
+
+        def poem_done(_):
+            if len(poems) + len(errors) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            d = get_poetry(host, port)
+            d.addCallback(cummingsify)
+            d.addErrback(cummingsify_failed)
+            d.addCallbacks(got_poem, poem_failed)
+            d.addBoth(poem_done)
+
+私たちが生成したそれぞれの遅延オブジェクトは、図24の構造を持ちます。
+
 .. _figure24:
 
-.. figure:: images/p10_deferred-10.png
+.. figure:: images/p10_deferred-9.png
 
     図２４：クライアント 5.1 における遅延オブジェクトの連鎖
 
+``cummingsify_failed`` というエラー用コールバックを確認してください。
+::
+
+    def cummingsify_failed(err):
+        if err.check(CannotCummingsify):
+            print 'Cummingsify failed!'
+            return err.value.args[0]
+        return err
+
+``Failure`` に内包された例外が ``CannotCummingsify`` のインスタンスかを確認するために、 ``Failure`` オブジェクトの check_ メソッドを使っています。
+もしもそうなら、第一引数 (元の詩) を例外に返し、エラーを処理します。
+戻り値は ``Failure`` ではありませんので、制御は通常のコールバックの流れに戻ります。
+そうでなければ ``Failure`` 自身を返し、エラーを送って (re-raise) エラー用コールバックの流れに落とし込みます。
+お分かりのように、例外は ``Failure`` の ``value`` 属性で参照できます。
+
+.. _check: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L305
+
+図25は ``CannotCummingsify`` 例外を受け取ったときに発生することを表します。
+
 .. _figure25:
 
-.. figure:: images/p10_deferred-42.png
+.. figure:: images/p10_deferred-10.png
 
     図２５：CannotCummigsify エラーが発生するとき
 
+ということで、遅延オブジェクトを使うときは、例外を処理するために ``try/except`` を使うようにするか、遅延オブジェクトにエラーをエラー用コールバックに再度送らせるかのどちらかを選択できます。
 
 まとめ
 ------
+パート10では、エラーを誘導してチェーンを辿らせる ``Deferred`` の力を使って詩のクライアントを更新しました。
+使った例はいくぶん実用的ではありませんが、遅延オブジェクトにおける制御フローがそれぞれのステージの結果によって通常のコールバックとエラー用コールバックを行き来する様子を描き出せていると思います。
 
-":doc:`p11`"
+さあ、これで遅延オブジェクトに関して知っておくべきことは全て身に着けましたか？
+いえ、まだです！
+今後のパートでも遅延オブジェクトの更なる機能を探求していきましょう。
+とはいえ":doc:`p11`"ではちょっと趣向を変えて、Twisted を使って詩のサーバを実装するとしましょう。
 
 おすすめの練習問題
 ------------------
-*
-*
-*
+#. 図25は、クライアント 5.1 における遅延オブジェクトが発火する４つの可能性のうちのひとつを表しています。
+   他の３つを書き出してみてください。
+#. `deferred simulator`_ を使って、クライアント 5.0 と 5.1 が発火する様子をシミュレートしてみましょう。
+   手始めに、このシミュレータプログラムは次のようにして、クライアント 5.0 における ``try_to_cummingsify`` 関数が成功する様子を表現できます。
+   ::
+
+        r poem p
+        r None r None
+        r None r None
+
+.. _deferred simulator: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/deferred-simulator.py#L1
