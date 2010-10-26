@@ -11,6 +11,115 @@
 
     図２７：ふたつのプロトコルを持つ変換サーバ
 
+..
+    <H3>One More Server</H3>
+    <P>Alright, we’ve written one Twisted server so let’s write another, and then we’ll get back to learning some more about Deferreds.</P>
+    <P>In Parts <A href="http://krondo.com/blog/?p=1825">9</A> and <A href="http://krondo.com/blog/?p=1956">10</A> we introduced the idea of a poetry transformation engine. The one we eventually implemented, the cummingsifier, was so simple we had to add random exceptions to simulate a failure. But if the transformation engine was located on another server, providing a network “poetry transformation service”, then there is a much more realistic failure mode: the transformation server is down.</P>
+    <P>So in Part 12 we’re going to implement a poetry transformation server and then, in the next Part, we’ll update our poetry client to use the external transformation service and learn a few new things about Deferreds in the process.</P>
+
+..
+    <H3>Designing the Protocol</H3>
+    <P>Up till now the interactions between client and server have been strictly one-way. The server sends a poem to the client while the client never sends anything at all to the server. But a transformation service is two-way — the client sends a poem to the server and then the server sends a transformed poem back. So we’ll need to use, or invent, a protocol to handle that interaction.</P>
+    <P>While we’re at it, let’s allow the server to support multiple kinds of transformations and allow the client to select which one to use. So the client will send two pieces of information: the name of the transformation and the complete text of the poem. And the server will return a single piece of information, namely the text of the transformed poem. So we’ve got a very simple sort of <A href="http://en.wikipedia.org/wiki/Remote_procedure_call">Remote Procedure Call</A>.</P>
+    <P>Twisted includes support for several protocols we could use to solve this problem, including <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/web/xmlrpc.py">XML-RPC</A>, <A href="http://twistedmatrix.com/documents/current/core/howto/pb-intro.html">Perspective Broker</A>, and <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/amp.py">AMP</A>.</P>
+    <P>But introducing any of these full-featured protocols would require us to go too far afield, so we’ll roll our own humble protocol instead. Let’s have the client send a string of the form (without the angle brackets):</P>
+    <P style="text-align: center;"><STRONG>&lt;transform-name&gt;.&lt;text of the poem&gt;</STRONG></P>
+    <P>That’s just the name of the transform, followed by a period, followed by the complete text of the poem itself. And we’ll encode the whole thing in the form of a <A href="http://en.wikipedia.org/wiki/Netstrings">netstring</A>. And the server will send back the text of the transformed poem, also in a netstring. Since netstrings use length-encoding, the client will be able to detect the case where the server fails to send back a complete result (maybe it crashed in the middle of the operation). If you recall, our original poetry protocol has trouble detecting aborted poetry deliveries.</P>
+    <P>So much for the protocol design. It’s not going to win any awards, but it’s good enough for our purposes.</P>
+
+..
+    <H3>The Code</H3>
+    <P>Let’s look at the code of our transformation server, located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L1"><TT>twisted-server-1/tranformedpoetry.py</TT></A>. First, we define a <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L41"><CODE>TransformService</CODE></A> class:</P>
+    <PRE>class TransformService(object):
+
+        def cummingsify(self, poem):
+            return poem.lower()</PRE>
+    <P>The transform service currently implements one transformation, <CODE>cummingsify</CODE>, via a method of the same name. We could add additional algorithms by adding additional methods. Here’s something important to notice: the transformation service is entirely independent of the particular details of the protocol we settled on earlier. Separating the protocol logic from the service logic is a common pattern in Twisted programming. Doing so makes it easy to provide the same service via multiple protocols without duplicating code.</P>
+    <P>Now let’s look at the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L67">protocol factory</A> (we’ll look at the protocol right after):</P>
+    <PRE>class TransformFactory(ServerFactory):
+
+        protocol = TransformProtocol
+
+        def __init__(self, service):
+            self.service = service
+
+        def transform(self, xform_name, poem):
+            thunk = getattr(self, 'xform_%s' % (xform_name,), None)
+
+            if thunk is None: # no such transform
+                return None
+
+            try:
+                return thunk(poem)
+            except:
+                return None # transform failed
+
+        def xform_cummingsify(self, poem):
+            return self.service.cummingsify(poem)</PRE>
+    <P>This factory provides a <CODE>transform</CODE> method which a protocol instance can use to request a poetry transformation on behalf of a connected client. The method returns <CODE>None</CODE> if there is no such transformation or if the transformation fails. And like the <CODE>TransformService</CODE>, the protocol factory is independent of the wire-level protocol, the details of which are delegated to the protocol class itself.</P>
+    <P>One thing to notice is the way we guard access to the service though the <CODE>xform_</CODE>-prefixed methods. This is a pattern you will find in the Twisted sources, although the prefixes vary and they are usually on an object separate from the factory. It’s one way of preventing client code from executing an arbitrary method on the service object, since the client can send any transform name they want. It also provides a place to perform protocol-specific adaptation to the API provided by the service object.</P>
+    <P>Now we’ll take a look at the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L47">protocol implementation</A>:</P>
+    <PRE>class TransformProtocol(NetstringReceiver):
+
+        def stringReceived(self, request):
+            if '.' not in request: # bad request
+                self.transport.loseConnection()
+                return
+
+            xform_name, poem = request.split('.', 1)
+
+            self.xformRequestReceived(xform_name, poem)
+
+        def xformRequestReceived(self, xform_name, poem):
+            new_poem = self.factory.transform(xform_name, poem)
+
+            if new_poem is not None:
+                self.sendString(new_poem)
+
+            self.transport.loseConnection()</PRE>
+    <P>In the protocol implementation we take advantage of the fact that Twisted supports netstrings via the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py#L31"><CODE>NetstringReceiver</CODE></A> protocol. That base class takes care of decoding (and encoding) the netstrings and all we have to do is implement the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py#L49"><CODE>stringReceived</CODE></A> method. In other words, <CODE>stringReceived</CODE> is called with the <EM>content</EM> of a netstring sent by the client, without the extra bytes added by the netstring encoding. The base class also takes care of buffering the incoming bytes until we have enough to decode a complete string.</P>
+    <P>If everything goes ok (and if it doesn’t we just close the connection) we send the transformed poem back to the client using the <CODE>sendString</CODE> method provided by <CODE>NetstringReceiver</CODE> (and which ultimately calls <CODE>transport.write()</CODE>). And that’s all there is to it. We won’t bother listing the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L89"><CODE>main</CODE></A> function since it’s similar to the ones we’ve seen before.</P>
+    <P>Notice how we continue the Twisted pattern of translating the incoming byte stream to higher and higher levels of abstraction by defining the <CODE>xformRequestReceived</CODE> method, which is passed the name of the transform and the poem as two separate arguments.</P>
+
+..
+    <H3>A Simple Client</H3>
+    <P>We’ll implement a Twisted client for the transformation service in the next Part. For now we’ll just make do with a simple script located  in <TT>twisted-server-1/transform-test</TT>. It uses the netcat program to send a poem to the server and then prints out the response (which will be encoded as a netstring). Let’s say you run the transformation server on port 11000 like this:</P>
+    <PRE>python twisted-server-1/tranformedpoetry.py --port 11000</PRE>
+    <P>Then you could run the test script against that server like this:</P>
+    <PRE>./twisted-server-1/transform-test 11000</PRE>
+    <P>And you should see some output like this:</P>
+    <PRE>15:here is my poem,</PRE>
+    <P>That’s the netstring-encoded transformed poem (the original is in all upper case).</P>
+
+..
+    <H3>Discussion</H3>
+    <P>We introduced a few new ideas in this Part:</P>
+    <OL>
+    <LI>Two-way communication.</LI>
+    <LI>Building on an existing protocol implementation provided by Twisted.</LI>
+    <LI>Using a service object to separate functional logic from protocol logic.</LI>
+    </OL>
+    <P>The basic mechanics of two-way communication are simple. We used the same techniques for reading and writing data in previous clients and servers; the only difference is we used them both together. Of course, a more complex protocol will require more complex code to process the byte stream and format outgoing messages. And that’s a great reason to use an existing protocol implementation like we did today.</P>
+    <P>Once you start getting comfortable writing basic protocols, it’s a good idea to take a look at the different protocol implementations provided by Twisted. You might start by perusing the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py"><CODE>twisted.protocols.basic</CODE></A> module and going from there. Writing simple protocols is a great way to familiarize yourself with the Twisted style of programming, but in a “real” program it’s probably a lot more common to use a ready-made implementation, assuming there is one available for the protocol you want to use.</P>
+    <P>The last new idea we introduced, the use of a Service object to separate functional and protocol logic, is a really important design pattern in Twisted programming. Although the service object we made today is trivial, you can imagine a more realistic network service could be quite complex. And by making the Service independent of protocol-level details, we can quickly provide the same service on a new protocol without duplicating code.</P>
+    <P>Figure 27 shows a transformation server that is providing poetry transformations via two different protocols (the version of the server we presented above only has one protocol):</P>
+    <DIV id="attachment_2128" class="wp-caption aligncenter" style="width: 579px"><A href="./part12_files/server-21.png"><IMG class="size-full wp-image-2128" title="Figure 27: a transformation server with two protocols" src="./part12_files/server-21.png" alt="Figure 27: a transformation server with two protocols" width="569" height="464"></A><P class="wp-caption-text">Figure 27: a transformation server with two protocols</P></DIV>
+    <P>Although we need two separate protocol factories in Figure 27, they might differ only in their <CODE>protocol</CODE> class attribute and would be otherwise identical. The factories would share the same Service object and only the <CODE>Protocol</CODE>s themselves would require separate implementations. Now that’s code re-use!</P>
+
+..
+    <H3>Looking Ahead</H3>
+    <P>So much for our transformation server. In <A href="http://krondo.com/blog/?p=2159">Part 13</A>, we’ll update our poetry client to use the transform server instead of implementing transformations in the client itself.</P>
+
+..
+    <H3>Suggested Exercises</H3>
+    <OL>
+    <LI>Read the source code for the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py#L31"><CODE>NetstringReceiver</CODE></A> class. What happens if the client sends a malformed netstring ? What happens if the client tries to send a huge netstring?</LI>
+    <LI>Invent another transformation algorithm and add it to the transformation service and the protocol factory. Test it out by modifying the netcat client.</LI>
+    <LI>Invent another protocol for requesting poetry transformations and modify the server to handle both protocols (on two different ports). Use the same instance of the <CODE>TransformService</CODE> for both.</LI>
+    <LI>How would the code need to change if the methods on the <CODE>TransformService</CODE> were asynchronous (i.e., they returned Deferreds)?</LI>
+    <LI>Write a synchronous client for the transformation server.</LI>
+    <LI>Update the original client and server to use netstrings when sending poetry.</LI>
+    </OL>
 
 まとめ
 ------
