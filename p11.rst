@@ -2,7 +2,122 @@
 パート11: 詩が提供されました
 ============================
 
-はじめに
+Twisted の詩のサーバ
+--------------------
+Twisted を使ってクライアントを実装することに関してはたくさんのことを学んできましたので、同じように、サーバを再実装することに目を向けてみましょう。
+Twisted の抽象化が汎用性である恩恵によって、必要なことは既に身に着いていることが分かるでしょう。
+`twisted-server-1/fastpoetry.py`_ にある Twisted による詩のサーバに目を通してみてください。
+このサーバは何の遅延もなくできる限り素早く詩を送り出しますので ``fastpoetry`` と呼ぶことにしましょう。
+クライアントのコードより遥かに少ない記述量ですね。
+
+.. _twisted-server-1/fastpoetry.py: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/fastpoetry.py#L1
+
+部分部分に分けて取り上げていくことにしましょう。まずは ``PoetryProtocol`` です。 ::
+
+    class PoetryProtocol(Protocol):
+
+        def connectionMade(self):
+            self.transport.write(self.factory.poem)
+            self.transport.loseConnection()
+
+クライアントと同じように、サーバも接続を管理する (ここでは、クライアントからサーバへの接続です) ために ``Protocol`` インスタンスを使います。
+ここでの ``Protocol`` は、詩のプロトコルにおけるサーバ側を実装しています。
+私たちが使う接続プロトコルは厳密に片方向ですので、サーバの ``Protocol`` インスタンスはデータを送るときにだけ接続されます。
+私たちが使う接続プロトコルは、接続が確立されるとすぐにサーバが詩を送り始めますので、 `connectionMade`_ メソッドを実装します。
+これは ``Protocol`` インスタンスが ``Transport`` につながった後に呼び出されるコールバックです。
+
+.. _connectionMade: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L351
+
+私たちのメソッドは ``Transport`` に二つのことをするように伝えます。
+詩の文章すべてを送ること (`self.transport.write`_) と、接続を閉じること (`self.transport.loseConnection`_) です。
+もちろん、どちらの操作も非同期です。
+``write()`` の呼び出しは実際は「いつかはすべてのデータをクライアントに送る」ことで、 ``loseConnection()`` の呼び出しは「書き込むようにお願いしておいた全てのデータを書き終えたら接続を閉じる」ことを意味します。
+
+.. _self.transport.write: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1302
+.. _self.transport.loseConnection: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1321
+
+お分かりのように、 ``Protocol`` は ``Factory`` から詩のテキストを受け取ります。
+その部分を見てみましょう。 ::
+
+    class PoetryFactory(ServerFactory):
+
+        protocol = PoetryProtocol
+
+        def __init__(self, poem):
+            self.poem = poem
+
+随分単純になりましたね。
+ここでのファクトリーの実際の仕事は、要求に合わせて ``PoetryProtocol`` インスタンスを生成することを除くと、それぞれの ``PoetryClient`` がクライアントに送り出す詩を保存しておくことだけです。
+
+``ClientFactory`` ではなく `ServerFactory`_ をサブクラス化していることに注意してください。
+能動的に接続しにいくのではなく、サーバは受動的に接続を待ち受けますので、 `ClientFactory`_  が提供する以上のメソッドは必要ありません。
+どうやってそれを確認できるのでしょうか？
+私たちは `listenTCP`_ という reactor のメソッドを使っていて、そのメソッドにおけるドキュメントでは ``factory`` 引数は ``ServerFactory`` のインスタンスであるべきだと述べているのです。
+
+.. _ServerFactory: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L317
+.. _ClientFactory: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L103
+.. _listenTCP: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L224
+
+``listenTCP`` を呼び出す ``main`` 関数はこのようになります。 ::
+
+    def main():
+        options, poetry_file = parse_args()
+
+        poem = open(poetry_file).read()
+
+        factory = PoetryFactory(poem)
+
+        from twisted.internet import reactor
+
+        port = reactor.listenTCP(options.port or 0, factory,
+                                 interface=options.iface)
+
+        print 'Serving %s on %s.' % (poetry_file, port.getHost())
+
+        reactor.run()
+
+これは基本的に次の３つのことを行います。
+
+1. 提供する詩のテキストを読み込みます。
+2. 提供する詩に対する ``PoetryFactory`` を生成します。
+3. 指定されたポートで接続を待ち受けるよう Twisted に伝えるために  ``listenTCP`` を使い、新しい接続に対するプロトコルのインスタンスを生成するためには我々が定義したファクトリを使います。
+
+さて、残るは reactor にループの開始を伝えることだけです。
+このサーバをテストするためには、これまで登場したあらゆる詩のクライアント (あるいは単に ``netcat``) を利用できます。
+
+議論
+----
+パート５の":ref:`figure8`"と":ref:`figure9`"を思い出してください。
+これらの図は、Twisted が接続したときに、新しい ``Protocol`` インスタンスがどのように生成および初期化されるかを描き出しています。
+待ち受けポートへの接続と同じ機構が使われていることが分かります。
+これこそが ``connectTCP`` と ``listenTCP`` の両方ともが ``factory`` 引数を必要とする理由です。
+
+":ref:`figure9`"で見えなかったことのひとつは、 ``connectionMade`` コールバックも ``Protocol`` の初期化中に呼び出されることです。
+何が起ころうともこれは実行されますが、クライアントコードでは私たちがそれを使うことはありませんでした。
+また、私たちがクライアントコードで使用した ``Protocol`` メソッドは、サーバの実装では使われていません。
+もしも私たちがやりたければ、クライアントとサーバの両方で動作する単一の ``PoetryProtocol`` がある共有ライブラリを作成することもできるでしょう。
+実際にこれが Twisted における典型的なやり方です。
+例えば `NetstringReceiver`_ プロトコルは、 ``Transport`` から `netstrings`_ を読むことも書くこともできます。
+
+.. _NetstringReceiver: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py#L31
+.. _netstrings: http://en.wikipedia.org/wiki/Netstrings
+
+サーバの低レベルなバージョンを実装することはスキップしました。
+しかし、背後でどのようなことが起こっているかを考えてみましょう。
+まず、 ``listenTCP`` の呼び出しは Twisted に `listening socket`_ (訳注:待ち受けソケット、と表記) を作成するよう伝えて、それをイベントループに付け足します。
+待ち受けソケットにおける "event" とは、そこに読むべきデータがあることを意味するものではありません。
+そうではなく、繋ぎにきているクライアントが待っていることを意味します。
+
+.. _listening socket: http://en.wikipedia.org/wiki/Berkeley_sockets#listen.28.29
+
+Twisted は接続要求を自動的に `accept`_ するでしょう。
+このため、個別のクライアントとサーバが直接接続する新しいクライアントソケットを生成します。
+このクライアントソケットはイベントループに追加されます。そこでは、決まったクライアント向けに、Twisted が新しい ``Transport`` と (``PoetryFactory`` 越しに) ``PoetryProtocol`` インスタンスを生成します。
+このため、 ``Protocol`` インスタンスはクライアントソケットにいつも接続されています。待ち受けソケットではありません。
+
+.. _accept: http://en.wikipedia.org/wiki/Berkeley_sockets#accept.28.29
+
+ここまでのことを図にしてみると図26のようになります。
 
 .. _figure26:
 
@@ -10,14 +125,39 @@
 
     図２６：動いている詩のサーバ
 
+この図には、詩のサーバに接続された３つのクライアントがあります。
+それぞれの ``Transport`` はひとつのクライアントソケットを表現します。待ち受けソケットは ``select`` ループを使って、合わせて４つのファイルディスクリプタを生成します。
+クライアントが切断されたとき、関連する ``Transport`` と ``PoetryProtocol`` は関係を断ち切られて回収 (garbage-collected) されます。私たちがどこかでそれらのうちのひとつへの参照を断ち切らなかったことを想像してみれば、メモリリークを防止するための慣習だと分かりますね。
+一方で、私たちの詩のサーバーが延々と新しい接続を待ち続ける間は、 ``PoetryFactory`` はずっと残り続けるでしょう。
+詩の美しさみたいですね。
+いずれにせよ、図26は大きな枠組みの丁度良い部分を切り出しているのではないでしょうか。
 
-まとめ
-------
 
-":doc:`p12`"
+提供している詩が比較的短いものならば、クライアントソケットとそれに関連する Python オブジェクトはそれほど長くは存続しません。
+しかし、巨大な詩を提供していてとても忙しいサーバならば、何百何千というクライアントが同時に接続することになってしまうでしょう。
+でも、それで良いのです。
+Twisted には処理できる接続数の制限が組み込まれていません。
+もちろん、いかなるサーバでも負荷を上げればいつかは耐え切れなくなるか、内部的な OS の制限に達してしまうこともあるでしょう。
+とはいえ、高負荷のサーバにとっては、注意深い計測やテストは日常茶飯事なのです。
+
+Twisted は待ち受けるポートの数にも制限を設けていません。
+実際、単一の Twisted プロセスは何十というポートを待ち受けて、それぞれのポートで別々のサービスを提供できます (それぞれの ``listenTCP`` 呼び出しで異なるファクトリクラスを使うのです)。
+そして注意深く設計されていると、複数のサービスを単一の Twisted プロセスにするか複数のプロセスにするかを、配備する段階まで先延ばしすることさえ可能になるでしょう。
+
+私たちが実装したサーバに不足していることもいくつかあります。
+まずは何といっても、問題のデバッグやネットワークの分析に役立つであろうログを出力しません。
+さらに、サーバはデーモンとして実行されていませんので、不用意な ``Ctrl+C`` (あるいは、ただログアウトしたとき) で停止してしまう脆弱性があります。
+こうした問題は先々のパートで修正していきますが、":doc:`p12`"では、詩を変換するもうひとつのサーバを実装してみます。
 
 おすすめの練習問題
 ------------------
-*
-*
-*
+
+1. ":doc:`p02`"でクライアントを書いたように、Twisted を使わないで非同期な詩のサーバを書いてください。
+   読み込みのために待ち受けソケットは監視される必要があることに注意してください。読み込み可能な待ち受けソケットとは、新しいクライアントソケットを ``accept`` できることを意味します。
+2. ":doc:`p04`"でクライアントを実装したように、 ``listenTCP`` やプロトコル、トランスポート、あるいはファクトリを除いた部分の Twisted を使って、低レベルの非同期な詩のサーバを記述してください。
+   自前の ``select`` ループの代わりに Twisted の reactor を使うのは構いません。
+3. ``transport.write()`` を複数回呼び出すために ``callLater`` か ``LoopingCall`` を使って、Twisted の詩のサーバの高レベルバージョンを「遅いサーバ」にしてください。
+   ブロッキングサーバーに対しては ``--num-bytes`` と ``--delay`` コマンドラインオプションを追加しましょう。
+   クライアントが詩の全てを受け取る前に接続断になった場合を扱うことも忘れないでください。
+4. 複数の詩を (異なるポートで) 提供できるように、高レベルの Twisted サーバを拡張してみましょう。
+5. 同じ Twisted のプロセスで複数のサービスを提供する理由が何かありますか？そうしない理由は何でしょうか？
