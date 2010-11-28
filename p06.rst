@@ -279,3 +279,196 @@ Twisted を使って記述するどの API においても、追加で二つの�
 #. ``Failure`` オブジェクトの `trap <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L278>`_ メソッドを学習してください。
    ``trap`` と ``try/except`` 文の ``except`` 節を比べてください。
 #. ``clientConnectionFailed`` は ``get_poetry`` が処理を返した後に呼ばれていることを検証するために ``print`` 文を使ってください。
+
+..
+    <H2>Part 6: And Then We Took It Higher</H2>
+    <P>This continues the introduction started <A href="http://krondo.com/blog/?p=1209">here</A>. You can find an index to the entire series <A href="http://krondo.com/blog/?page_id=1327">here</A>.</P>
+    <H3>Poetry for Everyone</H3>
+    <P>We’ve made a lot of progress with our poetry client. Our last version (2.0) is using Transports, Protocols, and Protocol Factories, the workhorses of Twisted networking. But there are more improvements to make. Client 2.0 (and also 2.1) can only be used for downloading poetry at the command line. This is because the <CODE>PoetryClientFactory</CODE> is not only in charge of getting poetry, but also in charge of shutting down the program when it’s finished. That’s an odd job for something called “<CODE>PoetryClientFactory</CODE>“, it really ought to do nothing beyond making <CODE>PoetryProtocol</CODE>s and collecting finished poems.</P>
+    <P>We need a way to send a poem to the code that requested the poem in the first place. In a synchronous program we might make an API like this:</P>
+    <PRE>def get_poetry(host, post):
+        """Return the text of a poem from the poetry server at the given host and port."""</PRE>
+    <P>But of course, we can’t do that here. The above function necessarily blocks until the poem is received in entirety, otherwise it couldn’t work the way the documentation claims. But this is a reactive program so blocking on a network socket is out of the question. We need a way to tell the calling code when the poem is ready, without blocking while the poem is in transit. But this is the same sort of problem that Twisted itself has. Twisted needs to tell our code when a socket is ready for I/O, or when some data has been received, or when a timeout has occurred, etc. We’ve seen that Twisted solves this problem using callbacks, so we can use callbacks too:</P>
+    <PRE>def get_poetry(host, port, callback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete.
+        """</PRE>
+    <P>Now we have an asynchronous API we can use with Twisted, so let’s go ahead and implement it.</P>
+    <P style="padding-left: 30px;">As I said before, we will at times be writing code in ways a typical Twisted programmer wouldn’t. This is one of those times and one of those ways. We’ll see in Parts 7 and 8 how to do this the “Twisted way” (surprise, it uses an abstraction!) but starting out simply will give us more insight into the finished version.</P>
+    <H3>Client 3.0</H3>
+    <P>You can find version 3.0 of our poetry client in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py"><TT>twisted-client-3/get-poetry.py</TT></A>. This version has an implementation of the <CODE>get_poetry</CODE> <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L77">function</A>:</P>
+    <PRE>def get_poetry(host, port, callback):
+        from twisted.internet import reactor
+        factory = PoetryClientFactory(callback)
+        reactor.connectTCP(host, port, factory)</PRE>
+    <P>The only new wrinkle here is passing the callback function to the <CODE>PoetryClientFactory</CODE>. The <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L66">factory</A> uses the callback to deliver the poem:</P>
+    <PRE>class PoetryClientFactory(ClientFactory):
+
+        protocol = PoetryProtocol
+
+        def __init__(self, callback):
+            self.callback = callback
+
+        def poem_finished(self, poem):
+            self.callback(poem)</PRE>
+    <P>Notice the factory is much simpler than in version 2.1 since it’s no longer in charge of shutting the reactor down. It’s also missing the code for detecting failures to connect, but we’ll fix that in a little bit. The <CODE>PoetryProtocol</CODE> itself doesn’t need to change at all so we just re-use the one from client 2.1:</P>
+    <PRE>class PoetryProtocol(Protocol):
+
+        poem = ''
+
+        def dataReceived(self, data):
+            self.poem += data
+
+        def connectionLost(self, reason):
+            self.poemReceived(self.poem)
+
+        def poemReceived(self, poem):
+            self.factory.poem_finished(poem)</PRE>
+    <P>With this change, the <CODE>get_poetry</CODE> function, and the <CODE>PoetryClientFactory</CODE> and <CODE>PoetryProtocol</CODE> classes, are now completely re-usable. They are all about downloading poetry and nothing else. All the logic for starting up and shutting down the reactor is in the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L90">main function</A> of our script:</P>
+    <PRE>def poetry_main():
+        addresses = parse_args()
+
+        from twisted.internet import reactor
+
+        poems = []
+
+        def got_poem(poem):
+            poems.append(poem)
+            if len(poems) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            get_poetry(host, port, got_poem)
+
+        reactor.run()
+
+        for poem in poems:
+            print poem</PRE>
+    <P>So if we wanted, we could take the re-usable parts and put them in a shared module that anyone could use to get their poetry (as long as they were using Twisted, of course).</P>
+    <P>By the way, when you’re actually testing client 3.0 you might re-configure the poetry servers to send the poetry faster or in bigger chunks. Now that the client is less chatty in terms of output it’s not as interesting to watch while it downloads the poems.</P>
+    <H3>Discussion</H3>
+    <P>We can visualize the callback chain at the point when a poem is delivered in Figure 11:<A name="figure11"></A></P>
+    <DIV id="attachment_1618" class="wp-caption aligncenter" style="width: 374px"><A href="./part6_files/reactor-poem-callback.png"><IMG class="size-full wp-image-1618" title="Figure 11: the poem callbacks" src="./part6_files/reactor-poem-callback.png" alt="Figure 11: the poem callbacks" width="364" height="385"></A><P class="wp-caption-text">Figure 11: the poem callbacks</P></DIV>
+    <P>Figure 11 is worth contemplating. Up until now we have depicted callback chains that terminate with a single call to “our code”. But when you are programming with Twisted, or any single-threaded reactive system, these callback chains might well include bits of our code making callbacks to other bits of our code. In other words, the reactive style of programming doesn’t stop when it reaches code we write ourselves. In a reactor-based system, it’s callbacks all the way down.</P>
+    <P>Keep that fact in mind when choosing Twisted for a project. When you make this decision:</P>
+    <BLOCKQUOTE><P>I’m going to use Twisted!</P></BLOCKQUOTE>
+    <P>You are also making this decision:</P>
+    <BLOCKQUOTE><P>I’m going to structure my program as a series of asynchronous callback chain invocations powered by a reactor loop!</P></BLOCKQUOTE>
+    <P>Now maybe you won’t exclaim it out loud the way I do, but it is nevertheless the case. That’s how Twisted works.</P>
+    <P>It’s likely that most Python programs are synchronous and most Python modules are synchronous too. If we were writing a synchronous program and suddenly realized it needed some poetry, we might use the synchronous version of our <CODE>get_poetry</CODE> function by adding a few lines of code to our script like these:</P>
+    <PRE>...
+    import poetrylib # I just made this module name up
+    poem = poetrylib.get_poetry(host, port)
+    ...</PRE>
+    <P>And continue on our way. If, later on, we decided we didn’t really want that poem after all then we’d just snip out those lines and no one would be the wiser. But if we were writing a synchronous program and then decided to use the Twisted version of <CODE>get_poetry</CODE>, we would need to re-architect our program in the asynchronous style using callbacks. We would probably have to make significant changes to the code. Now, I’m not saying it would necessarily be a mistake to rewrite the program. It might very well make sense to do so given our requirements. But it won’t be as simple as adding an <CODE>import</CODE> line and an extra function call. Simply put, synchronous and asynchronous code do not mix.</P>
+    <P>If you are new to Twisted and asynchronous programming, I might recommend writing a few Twisted programs from scratch before you attempt to port an existing codebase. That way you will get a feel for using Twisted without the extra complexity of trying to think in both modes at once as you port from one to the other.</P>
+    <P style="padding-left: 30px;">If, however, your program is already asynchronous then using Twisted might be much easier. Twisted integrates relatively smoothly with <A href="http://pygtk.org/">pyGTK</A> and <A href="http://wiki.python.org/moin/PyQt">pyQT</A>, the Python APIs for two reactor-based GUI toolkits.</P>
+    <H3>When Things Go Wrong</H3>
+    <P>In client 3.0 we no longer detect a failure to connect to a poetry server, an omission which causes even more problems than it did in client 1.0. If we tell client 3.0 to download a poem from a non-existent server then instead of crashing it just waits there forever. The <CODE>clientConnectionFailed</CODE> callback still gets called, but the default implementation in the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L103"><CODE>ClientFactory</CODE></A> base class doesn’t do anything at all. So the <CODE>got_poem</CODE> callback is never called, the reactor is never stopped, and we’ve got another do-nothing program like the ones we made in <A href="http://krondo.com/blog/?p=1247">Part 2</A>.</P>
+    <P>Clearly we need to handle this error, but where? The information about the failure to connect is delivered to the factory object via <CODE>clientConnectionFailed</CODE> so we’ll have to start there. But this factory is supposed to be re-usable, and the proper way to handle an error will depend on the context in which the factory is being used. In some applications, missing poetry might be a disaster (No poetry?? Might as well just crash). In others, maybe we just keep on going and try to get another poem from somewhere else.</P>
+    <P>In other words, the users of <CODE>get_poetry</CODE> need to know when things go wrong, not just when they go right. In a synchronous program, <CODE>get_poetry</CODE> would raise an <CODE>Exception</CODE> and the calling code could handle it with a <CODE>try</CODE>/<CODE>except</CODE> statement. But in a reactive program, error conditions have to be delivered asynchronously, too. After all, we won’t even find out the connection failed until after <CODE>get_poetry</CODE> returns. Here’s one possibility:</P>
+    <PRE>def get_poetry(host, port, callback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete. If there is a failure, invoke:
+
+          callback(None)
+
+        instead.
+        """</PRE>
+    <P>By testing the callback argument (i.e., <CODE>if poem is None</CODE>) the client can determine whether we actually got a poem or not. This would suffice for our client to avoid running forever, but that approach still has some problems. First of all, using <CODE>None</CODE> to indicate failure is somewhat ad-hoc. Some asynchronous APIs might want to use <CODE>None</CODE> as a default return value instead of an error condition. Second, a <CODE>None</CODE> value carries a very limited amount of information. It can’t tell us what went wrong, or include a traceback object we can use in debugging. Ok, second try:</P>
+    <PRE>def get_poetry(host, port, callback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete. If there is a failure, invoke:
+
+          callback(err)
+
+        instead, where err is an Exception instance.
+        """</PRE>
+    <P>Using an <CODE>Exception</CODE> is closer to what we are used to with synchronous programming. Now we can look at the exception to get more information about what went wrong and <CODE>None</CODE> is free for use as a regular value. Normally, though, when we encounter an exception in Python we also get a traceback we can analyze or print to a log for debugging at some later date. Tracebacks are extremely useful so we shouldn’t give them up just because we are using asynchronous programming.</P>
+    <P>Keep in mind we don’t want a traceback object for the point where our callback is invoked, that’s not where the problem happened. What we really want is both the <CODE>Exception</CODE> instance and the traceback from the point where that exception was raised (assuming it was raised and not simply created).</P>
+    <P>Twisted includes an abstraction called a <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L121"><CODE>Failure</CODE></A> that wraps up both an <CODE>Exception</CODE> and the traceback, if any, that went with it. The <CODE>Failure</CODE> <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L141">docstring</A> explains how to create one. By passing <CODE>Failure</CODE> objects to callbacks we can preserve the traceback information that’s so handy for debugging.</P>
+    <P>There is some example code that uses <CODE>Failure</CODE> objects in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-failure/failure-examples.py"><TT>twisted-failure/failure-examples.py</TT></A>. It shows how <CODE>Failure</CODE>s can preserve the traceback information from a raised exception, even outside the context of an <CODE>except</CODE> block. We won’t dwell too much on making <CODE>Failure</CODE> instances. In Part 7 we’ll see that Twisted generally ends up making them for us.</P>
+    <P>Alright, third try:</P>
+    <PRE>def get_poetry(host, port, callback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete. If there is a failure, invoke:
+
+          callback(err)
+
+        instead, where err is a twisted.python.failure.Failure instance.
+        """</PRE>
+    <P>With this version we get both an <CODE>Exception</CODE> and possibly a traceback record when things go wrong. Nice.</P>
+    <P>We’re almost there, but we’ve got one more problem. Using the same callback for both normal results and failures is kind of odd. In general, we need to do quite different things on failure than on success. In a synchronous Python program we generally handle success and failure with two different code paths in a <CODE>try</CODE>/<CODE>except</CODE> statement like this:</P>
+    <PRE>try:
+        attempt_to_do_something_with_poetry()
+    except RhymeSchemeViolation:
+        # the code path when things go wrong
+    else:
+        # the code path when things go so, so right baby</PRE>
+    <P>If we want to preserve this style of error-handling, then we need to use a separate code path for failures. In asynchronous programming a separate code path means a separate callback:</P>
+    <PRE>def get_poetry(host, port, callback, errback):
+        """
+        Download a poem from the given host and port and invoke
+
+          callback(poem)
+
+        when the poem is complete. If there is a failure, invoke:
+
+          errback(err)
+
+        instead, where err is a twisted.python.failure.Failure instance.
+        """</PRE>
+    <H3>Client 3.1</H3>
+    <P>Now that we have an API with reasonable error-handling semantics we can implement it. Client 3.1 is located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py"><CODE>twisted-client-3/get-poetry-1.py</CODE></A>. The changes are pretty straightforward. The <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L66"><CODE>PoetryClientFactory</CODE></A> gets both a <CODE>callback</CODE> and an <CODE>errback</CODE>, and now it implements <CODE>clientConnectionFailed</CODE>:</P>
+    <PRE>class PoetryClientFactory(ClientFactory):
+
+        protocol = PoetryProtocol
+
+        def __init__(self, callback, errback):
+            self.callback = callback
+            self.errback = errback
+
+        def poem_finished(self, poem):
+            self.callback(poem)
+
+        def clientConnectionFailed(self, connector, reason):
+            self.errback(reason)</PRE>
+    <P>Since <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L118"><CODE>clientConnectionFailed</CODE></A> already receives a <CODE>Failure</CODE> object (the <CODE>reason</CODE> argument) that explains why the connection failed, we just pass that along to the <CODE>errback</CODE>.</P>
+    <P>The other changes are all of a piece so I won’t bother posting them here. You can test client 3.1 by using a port with no server like this:</P>
+    <PRE>python twisted-client-3/get-poetry-1.py 10004</PRE>
+    <P>And you’ll get some output like this:</P>
+    <PRE>Poem failed: [Failure instance: Traceback (failure with no frames): : Connection was refused by other side: 111: Connection refused.
+    ]</PRE>
+    <P>That’s from the <CODE>print</CODE> statement in our <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L110"><CODE>poem_failed</CODE></A> errback. In this case, Twisted has simply passed us an <CODE>Exception</CODE> rather than raising it, so we don’t get a traceback here. But a traceback isn’t really needed since this isn’t a bug, it’s just Twisted informing us, correctly, that we can’t connect to that address.</P>
+    <H3>Summary</H3>
+    <P>Here’s what we’ve learned in Part 6:</P>
+    <UL>
+    <LI>The APIs we write for Twisted programs will have to be asynchronous.</LI>
+    <LI>We can’t mix synchronous code with asynchronous code.</LI>
+    <LI>Thus, we have to use callbacks in our own code, just like Twisted does.</LI>
+    <LI>And we have to handle errors with callbacks, too.</LI>
+    </UL>
+    <P>Does that mean every API we write with Twisted has to include two extra arguments, a callback and an errback? That doesn’t sound so nice. Fortunately, Twisted has an abstraction we can use to eliminate both those arguments and pick up a few extra features in the bargain. We’ll learn about it in <A href="http://krondo.com/blog/?p=1682">Part 7</A>.</P>
+    <H3>Suggested Exercises</H3>
+    <OL>
+    <LI>Update client 3.1 to timeout if the poem isn’t received after a given period of time. Invoke the errback with a custom exception in that case. Don’t forget to close the connection when you do.</LI>
+    <LI>Study the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L278"><CODE>trap</CODE></A> method on <CODE>Failure</CODE> objects. Compare it to the <CODE>except</CODE> clause in the <CODE>try</CODE>/<CODE>except</CODE> statement.</LI>
+    <LI>Use <CODE>print</CODE> statements to verify that <CODE>clientConnectionFailed</CODE> is called after <CODE>get_poetry</CODE> returns.</LI>
+    </OL>
