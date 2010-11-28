@@ -311,3 +311,148 @@ Deferred_ クラスには、チェーンにペアを追加するために使え�
     後のふたつのメソッドはペアのうちの片方のメンバーとして暗黙的に関数を受け渡すことを思い出してください。
 
 .. _Deferred: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L172
+
+..
+    <H2>Part 9: A Second Interlude, Deferred</H2>
+    <P>This continues the introduction started <A href="http://krondo.com/blog/?p=1209">here</A>. You can find an index to the entire series <A href="http://krondo.com/blog/?page_id=1327">here</A>.</P>
+    <H3>More Consequence of Callbacks</H3>
+    <P>We’re going to pause for a moment to think about callbacks again. Although we now know enough about deferreds to write simple asynchronous programs in the Twisted style, the <CODE>Deferred</CODE> class provides more features that only come into play in more complex settings. So we’re going to think up some more complex settings and see what sort of challenges they pose when programming with callbacks. Then we’ll investigate how deferreds address those challenges.</P>
+    <P>To motivate our discussion we’re going to add a hypothetical feature to our poetry client. Suppose some hard-working Computer Science professor has invented a new poetry-related algorithm, the Byronification Engine. This nifty algorithm takes a single poem as input and produces a new poem like the original, but written in the style of <A href="http://en.wikipedia.org/wiki/George_Gordon_Byron,_6th_Baron_Byron">Lord Byron</A>. What’s more, our professor has kindly provided a reference implementation in Python, with this interface:</P>
+    <PRE>class IByronificationEngine(Interface):
+
+        def byronificate(poem):
+            """
+            Return a new poem like the original, but in the style of Lord Byron.
+
+            Raises GibberishError if the input is not a genuine poem.
+            """</PRE>
+    <P>Like most bleeding-edge software, the implementation has some bugs. This means that in addition to the documented exception, the <CODE>byronificate</CODE> method sometimes throws random exceptions when it hits a corner-case the professor forgot to handle.</P>
+    <P>We’ll also assume the engine runs fast enough that we can just call it in the main thread without worrying about tying up the reactor. This is how we want our program to work:</P>
+    <OL>
+    <LI>Try to download the poem.</LI>
+    <LI>If the download fails, tell the user we couldn’t get the poem.</LI>
+    <LI>If we do get the poem, transform it with the Byronification Engine.</LI>
+    <LI>If the engine throws a <CODE>GibberishError</CODE>, tell the user we couldn’t get the poem.</LI>
+    <LI>If the engine throws another exception, just keep the original poem.</LI>
+    <LI>If we have a poem, print it out.</LI>
+    <LI>End the program.</LI>
+    </OL>
+    <P>The idea here is that a <CODE>GibberishError</CODE> means we didn’t get an actual poem after all, so we’ll just tell the user the download failed. That’s not so useful for debugging, but our users just want to know whether we got a poem or not. On the other hand, if the engine fails for some other reason then we’ll use the poem we got from the server. After all, some poetry is better than none at all, even if it’s not in the trademark Byron style.</P>
+    <P>Here’s the synchronous version of our code:</P>
+    <PRE>try:
+        poem = get_poetry(host, port) # synchronous get_poetry
+    except:
+        print &gt;&gt;sys.stderr, 'The poem download failed.'
+    else:
+        try:
+            poem = engine.byronificate(poem)
+        except GibberishError:
+            print &gt;&gt;sys.stderr, 'The poem download failed.'
+        except:
+            print poem # handle other exceptions by using the original poem
+        else:
+            print poem
+
+    sys.exit()</PRE>
+    <P>This sketch of a program could be make simpler with some refactoring, but it illustrates the flow of logic pretty clearly. We want to update our most recent poetry client (which uses deferreds) to implement this same scheme. But we won’t do that until Part 10. For now, instead, let’s imagine how we might do this with <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py">client 3.1</A>, our last client that didn’t use deferreds at all. Suppose we didn’t bother handling exceptions, but instead just changed the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L106"><CODE>got_poem</CODE></A> callback like this:</P>
+    <PRE>def got_poem(poem):
+        poems.append(byron_engine.byronificate(poem))
+        poem_done()</PRE>
+    <P>What happens when the <CODE>byronificate</CODE> method raises a <CODE>GibberishError</CODE> or some other exception? Looking at <A href="http://krondo.com/blog/?p=1595#figure11">Figure 11</A> from Part 6, we can see that:</P>
+    <OL>
+    <LI>The exception will propagate to the <CODE>poem_finished</CODE> callback in the factory, the method that actually invokes the callback.</LI>
+    <LI>Since <CODE>poem_finished</CODE> doesn’t catch the exception, it will proceed to <CODE>poemReceived</CODE> on the protocol.</LI>
+    <LI>And then on to <CODE>connectionLost</CODE>, also on the protocol.</LI>
+    <LI>And then up into the core of Twisted itself, finally ending up at the reactor.</LI>
+    </OL>
+    <P>As we have learned, the reactor will catch and log the exception instead of crashing. But what it certainly won’t do is tell the user we couldn’t download a poem. The reactor doesn’t know anything about poems or <CODE>GibberishError</CODE>s, it’s a general-purpose piece of code used for all kinds of networking, even non-poetry-related networking.</P>
+    <P>Notice how, at each step in the list above, the exception moves to a more general-purpose piece of code than the one before. And at no step after <CODE>got_poem</CODE> is the exception in a piece of code that could be expected to handle an error in the specific way we want for this client. This situation is basically the exact opposite of the way exceptions propagate in synchronous code.</P>
+    <P>Take a look at Figure 15, an illustration of  a call stack we might see with a synchronous poetry client:</P>
+    <DIV id="attachment_1863" class="wp-caption aligncenter" style="width: 397px"><A href="./part9_files/sync-exceptions1.png"><IMG class="size-full wp-image-1863 " title="Figure 15: synchronous code and exceptions" src="./part9_files/sync-exceptions1.png" alt="Figure 15: exceptions in synchronous code" width="387" height="257"></A><P class="wp-caption-text">Figure 15: synchronous code and exceptions</P></DIV>
+    <P>The <CODE>main</CODE> function is “high-context”, meaning it knows a lot about the whole program, why it exists, and how it’s supposed to behave overall. Typically, <CODE>main</CODE> would have access to the command-line options that indicate just how the user wants the program to work (and perhaps what to do if something goes wrong). It also has a very specific purpose: running the show for a command-line poetry client.</P>
+    <P>The socket <CODE>connect</CODE> method, on the other hand, is “low-context”. All it knows is that it’s supposed to connect to some network address. It doesn’t know what’s on the other end or why we need to connect right now. But <CODE>connect</CODE> is quite general-purpose — you can use it no matter what sort of service you are connecting to.</P>
+    <P>And <CODE>get_poetry</CODE> is in the middle. It knows it’s getting some poetry (and that’s the only thing it’s really good at), but not what should happen if it can’t.</P>
+    <P>So an exception thrown by  <CODE>connect</CODE> will&nbsp; move up the stack, from low-context and general-purpose code to high-context and special-purpose code, until it reaches some code with enough context to know what to do when something goes wrong (or it hits the Python interpreter and the program crashes).</P>
+    <P>Of course the exception is really just moving up the stack no matter what rather than literally seeking out high-context code. It’s just that in a typical synchronous program “up the stack” and “towards higher-context” are the same direction.</P>
+    <P>Now recall our hypothetical modification to client 3.1 above. The call stack we analyzed is pictured in Figure 16, abbreviated to just a few functions:</P>
+    <DIV id="attachment_1883" class="wp-caption aligncenter" style="width: 432px"><A href="./part9_files/async-exceptions4.png"><IMG class="size-full wp-image-1883" title="Figure 16: asynchronous callbacks and exceptions" src="./part9_files/async-exceptions4.png" alt="Figure 16: asynchronous callbacks and exceptions" width="422" height="245"></A><P class="wp-caption-text">Figure 16: asynchronous callbacks and exceptions</P></DIV>
+    <P>The problem is now clear: during a callback, low-context code (the reactor) is calling higher-context code which may in turn call even higher-context code, and so on. So if an exception occurs and it isn’t handled immediately, close to the same stack frame where it occurred, it’s unlikely to be handled at all. Because each time the exception moves up the stack it moves to a piece of lower-context code that’s even less likely to know what to do.</P>
+    <P>Once an exception crosses over into the Twisted core the game is up. The exception will not be handled, it will only be noted (when the reactor finally catches it). So when we are programming with “plain old” callbacks (without using deferreds), we must be careful to catch every exception before it gets back into Twisted proper, at least if we want to have any chance of handling errors according to our own rules. And that includes exceptions caused by our own bugs!</P>
+    <P>Since a bug can exist anywhere in our code, we would need to wrap every callback we write in an extra “outer layer” of <CODE>try</CODE>/<CODE>except</CODE> statements so the exceptions from our fumble-fingered typos can be handled as well. And the same goes for our errbacks because code to handle errors can have bugs too.</P>
+    <P>Well that’s not so nice.</P>
+    <H3>The Fine Structure of Deferreds</H3>
+    <P>It turns out the <CODE>Deferred</CODE> class helps us solve this problem. Whenever a deferred invokes a callback or errback, it catches any exception that might be raised. In other words, a deferred acts as the “outer layer” of <CODE>try</CODE>/<CODE>except</CODE> statements so we don’t need to write that layer after all, as long as we use deferreds. But what does a deferred do with an exception it catches? Simple — it passes the exception (in the form of a <CODE>Failure</CODE>) to the next errback in the chain.</P>
+    <P>So the first errback we add to a deferred is there to handle whatever error condition is signaled when the deferred’s <CODE>.errback(err)</CODE> method is called. But the second errback will handle any exception raised by either the first callback or the first errback, and so on down the line.</P>
+    <P>Recall <A href="http://krondo.com/blog/?p=1682#figure12">Figure 12</A>, a visual representation of a deferred with some callbacks and errbacks in the chain. Let’s call the first callback/errback pair stage 0, the next pair stage 1, and so on.</P>
+    <P>At a given stage <STRONG>N</STRONG>,  if either the callback or the errback (whichever was executed) fails, then the errback in stage <STRONG>N+1</STRONG> is called with the appropriate <CODE>Failure</CODE> object and the callback in stage <STRONG>N+1</STRONG> is <EM>not</EM> called.</P>
+    <P>By passing exceptions raised by callbacks “down the chain”, a deferred moves exceptions in the direction of “higher context”. This also means that invoking the <CODE>callback</CODE> and <CODE>errback</CODE> methods of a deferred will never result in an exception for the caller (as long as you only fire the deferred once!), so lower-level code can safely fire a deferred without worrying about catching exceptions. Instead, higher-level code catches the exception by adding errbacks to the deferred (with <CODE>addErrback</CODE>, etc.).</P>
+    <P>Now in synchronous code, an exception stops propagating as soon as it is caught. So how does an errback signal the fact that it “caught” the error? Also simple — by <EM>not</EM> raising an exception. And in that case, the execution switches over to the callback line. So at a given stage <STRONG>N</STRONG>, if either the callback or errback succeeds (i.e., doesn’t raise an exception) then the callback in stage <STRONG>N+1</STRONG> is called with the return value from stage <STRONG>N</STRONG>, and the errback in stage <STRONG>N+1</STRONG> is <EM>not</EM> called.</P>
+    <P>Let’s summarize what we know about the deferred firing pattern:</P>
+    <OL>
+    <LI>A deferred contains a chain of ordered callback/errback pairs (stages). The pairs are in the order they were added to the deferred.</LI>
+    <LI>Stage 0, the first callback/errback pair, is invoked when the deferred is fired. If the deferred is fired with the <CODE>callback</CODE> method, then the stage 0 callback is called. If the deferred is fired with the <CODE>errback</CODE> method, then the stage 0 errback is called.</LI>
+    <LI>If stage <STRONG>N</STRONG> fails, then the stage <STRONG>N+1</STRONG> errback is called with the exception (wrapped in a <CODE>Failure</CODE>) as the first argument.</LI>
+    <LI>If stage <STRONG>N</STRONG> succeeds, then the stage <STRONG>N+1</STRONG> callback is called with the stage <STRONG>N</STRONG> return value as the first argument.</LI>
+    </OL>
+    <P>This pattern is illustrated in Figure 17:</P>
+    <DIV id="attachment_1890" class="wp-caption aligncenter" style="width: 336px"><A href="./part9_files/deferred-2.png"><IMG class="size-full wp-image-1890" title="Figure 17: control flow in a deferred" src="./part9_files/deferred-2.png" alt="Figure 17: control flow in a deferred" width="326" height="321"></A><P class="wp-caption-text">Figure 17: control flow in a deferred</P></DIV>
+    <P>The green lines indicate what happens when a callback or errback succeeds and the red lines are for failures. The lines show both the flow of control and the flow of exceptions and return values down the chain. Figure 17 shows all possible paths a deferred might take, but only one path will be taken in any particular case. Figure 18 shows one possible path for a “firing”:</P>
+    <DIV id="attachment_1893" class="wp-caption aligncenter" style="width: 281px"><A href="./part9_files/deferred-31.png"><IMG class="size-full wp-image-1893" title="Figure 18: one possible deferred firing pattern" src="./part9_files/deferred-31.png" alt="Figure 18: one possible deferred firing pattern" width="271" height="349"></A><P class="wp-caption-text">Figure 18: one possible deferred firing pattern</P></DIV>
+    <P>In figure 18, the deferred’s <CODE>callback</CODE> method is called, which invokes the callback in stage 0. That callback succeeds, so control (and the return value from stage 0) passes to the stage 1 callback. But that callback fails (raises an exception), so control switches to the errback in stage 2. The errback “handles” the error (it doesn’t raise an exception) so control moves back to the callback chain and the callback in stage 3 is called with the result from the stage 2 errback.</P>
+    <P>Notice that any path you can make with Figure 17 will pass through every stage in the chain, but only one member of the callback/errback pair at any stage will be called.</P>
+    <P>In Figure 18, we’ve indicated that the stage 3 callback succeeds by drawing a green arrow out of it, but since there aren’t any more stages in that deferred, the result of stage 3 doesn’t really go anywhere. If the callback succeeds, that’s not really a problem, but what if it had failed? If the last stage in a deferred fails, then we say the failure is <EM>unhandled</EM>, since there is no errback to “catch” it.</P>
+    <P>In synchronous code an unhandled exception will crash the interpreter, and in plain-old-callbacks asynchronous code an unhandled exception is caught by the reactor and logged. What happens to unhandled exceptions in deferreds? Let’s try it out and see. Look at the sample code in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-unhandled.py#L1"><TT>twisted-deferred/defer-unhandled.py</TT></A>. That code is firing a deferred with a single callback that always raises an exception. Here’s the output of the program:</P>
+    <PRE>Finished
+    Unhandled error in Deferred:
+    Traceback (most recent call last):
+      ...
+    --- &lt;exception caught here&gt; ---
+      ...
+    exceptions.Exception: oops</PRE>
+    <P>Some things to notice:</P>
+    <OL>
+    <LI>The last <CODE>print</CODE> statement runs, so the program is not “crashed” by the exception.</LI>
+    <LI>That means the Traceback is just getting printed out, it’s not crashing the interpreter.</LI>
+    <LI>The text of the traceback  tells us where the deferred itself caught the exception.</LI>
+    <LI>The “Unhandled” message gets printed out after “Finished”.</LI>
+    </OL>
+    <P>So when you use deferreds, unhandled exceptions in callbacks will still be noted, for debugging purposes, but as usual they won’t crash the program (in fact they won’t even make it to the reactor, the deferred will catch them first). By the way, the reason that “Finished” comes first is because the “Unhandled” message isn’t actually printed until the deferred is garbage collected. We’ll see the reason for that in a future Part.</P>
+    <P>Now, in synchronous code we can “re-raise” an exception using the <CODE>raise</CODE> keyword without any arguments. Doing so raises the original exception we were handling and allows us to take some action on an error without completely handling it. It turns out we can do the same thing in an errback. A deferred will consider a callback/errback to have failed if:</P>
+    <UL>
+    <LI>The callback/errback raises any kind of exception, or</LI>
+    <LI>The callback/errback returns a <CODE>Failure</CODE> object.</LI>
+    </UL>
+    <P>Since an errback’s first argument is always a <CODE>Failure</CODE>, an errback can “re-raise” the exception by returning its first argument, after performing whatever action it wants to take.</P>
+    <H3>Callbacks and Errbacks, Two by Two</H3>
+    <P>One thing that should be clear from the above discussion is that the order you add callbacks and errbacks to a deferred makes a big difference in how the deferred will fire. What should also be clear is that, in a deferred,&nbsp;callbacks and errbacks always occur in pairs. There are four methods on the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L172"><CODE>Deferred</CODE></A> class you can use to add pairs to the chain:</P>
+    <OL>
+    <LI><CODE>addCallbacks</CODE></LI>
+    <LI><CODE>addCallback</CODE></LI>
+    <LI><CODE>addErrback</CODE></LI>
+    <LI><CODE>addBoth</CODE></LI>
+    </OL>
+    <P>Obviously, the first and last methods add a pair to the chain. But the middle two methods also add a callback/errback pair. The <CODE>addCallback</CODE> method adds an explicit callback (the one you pass to the method) and an implicit “pass-through” errback. A pass-through function is a dummy function that just returns its first argument. Since the first argument to an errback is always a <CODE>Failure</CODE>, a pass-through errback will always “fail” and send its error to the next errback in the chain.</P>
+    <P>As you’ve no doubt guessed, the <CODE>addErrback</CODE> function adds an explicit errback and an implicit pass-through callback. And since the first argument to a callback is never a <CODE>Failure</CODE>, a pass-through callback sends its result to the next callback in the chain.</P>
+    <H3>The Deferred Simulator</H3>
+    <P>It’s a good idea to become familiar with the way deferreds fire their callbacks and errbacks. The python script in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/deferred-simulator.py#L1"><TT>twisted-deferred/deferred-simulator.py</TT></A> is a “deferred simulator”, a little python program that lets you explore how deferreds fire. When you run the script it will ask you to enter list of callback and errback pairs, one per line. For each callback or errback, you specify that either:</P>
+    <UL>
+    <LI>It returns a given value (succeds), or</LI>
+    <LI>It raises a given exception (fails), or</LI>
+    <LI>It returns its argument (passthru).</LI>
+    </UL>
+    <P>After you’ve entered all the pairs you want to simulate, the script will print out, in high-resolution ASCII art, a diagram showing the contents of the chain and the firing patterns for the <CODE>callback</CODE> and <CODE>errback</CODE> methods. You will want to use a terminal window that is as wide as possible to see everything correctly. You can also use the <TT>--narrow</TT> option to print the diagrams one after the other, but it’s easier to see their relationships when you print them side-by-side.</P>
+    <P>Of course, in real code a callback isn’t going to return the same value every time, and a given function might sometimes succeed and other times fail. But the simulator can give you a picture of what will happen for a given combination of normal results and failures, in a given arrangement of callbacks and errbacks.</P>
+    <H3>Summary</H3>
+    <P>After thinking some more about callbacks, we realize that letting callback exceptions  bubble up the stack isn’t going to work out so well, since callback programming inverts the usual relationship between low-context and high-context code. And  the Deferred class tackles this problem by catching exceptions and sending them down the chain instead of up into the reactor.</P>
+    <P>We’ve also learned that ordinary results (<CODE>return</CODE> values)  move down the chain as well. Combining both facts together results in a kind of criss-cross firing pattern as the deferred switches back and forth between the callback and errback lines, depending on the result of each stage.</P>
+    <P>Armed with this knowledge, in <A href="http://krondo.com/blog/?p=1956">Part 10</A> we will update our poetry client with some poetry transformation logic.</P>
+    <H3>Suggested Exercises</H3>
+    <OL>
+    <LI>Inspect the implementation of each of the four methods on the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L172"><CODE>Deferred</CODE></A> which add callbacks and errbacks. Verify that all methods add a callback/errback pair.</LI>
+    <LI>Use the deferred simulator to investigate the difference between this code:
+    <PRE>deferred.addCallbacks(my_callback, my_errback)</PRE>
+    <P>and this code:</P>
+    <PRE>deferred.addCallback(my_callback)
+    deferred.addErrback(my_errback)</PRE>
+    <P>Recall that the last two methods add implicit pass-through functions as one member of the pair.</P></LI>
+    </OL>

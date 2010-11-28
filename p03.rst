@@ -238,3 +238,166 @@ Twisted はコールバックという形で私たちのコードを呼び出し
 ------------------
 #. ``countdown.py`` プログラムを、三つの独立したカウンターが異なる比率で動くようにしてみましょう。全てのカウンターが完了したら reactor を止めてください。
 #. `twisted.internet.task <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/task.py>`_ の ``LoopingCall`` クラスを見てください。 `LoopingCall <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/task.py#L23>`_ を使って上記のカウントダウンプログラムを書き直してください。 ``start`` と ``stop`` メソッドを使うだけで構いませんし、「遅延された」(deferred) 戻り値を使う必要はありません。遅延された値が何であるかは、この後のパートで学習することになります。
+
+..
+    <H2>Part 3: Our Eye-beams Begin to Twist</H2>
+    <P>This continues the introduction started <A href="http://krondo.com/blog/?p=1209">here</A>. You can find an index to the entire series <A href="http://krondo.com/blog/?page_id=1327">here</A>.</P>
+    <H3>Doing Nothing, the Twisted Way</H3>
+    <P>Eventually we are going to re-implement our asynchronous poetry client using Twisted. But first let’s write a few really simple Twisted programs just to get the flavor of things. As I mentioned in Part 2, I developed these examples using Twisted 8.2.0. Twisted APIs do change, but the core APIs we are going to use will likely change slowly, if at all, so I expect these examples to work for many future releases. If you don’t have Twisted installed you can obtain it <A href="http://twistedmatrix.com/trac/wiki/Downloads">here</A>.</P>
+    <P>The absolute simplest Twisted program is listed below, and is also available in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/simple.py"><TT>basic-twisted/simple.py</TT></A> in the base directory of the <TT>twisted-intro</TT> example code.</P>
+    <PRE>from twisted.internet import reactor
+    reactor.run()</PRE>
+    <P>You can run it like this:</P>
+    <PRE>python basic-twisted/simple.py</PRE>
+    <P>As we saw in <A href="http://krondo.com/blog/?p=1247">Part 2</A>, Twisted is an implementation of the <A href="http://en.wikipedia.org/wiki/Reactor_pattern">Reactor Pattern</A> and thus contains an object that represents the reactor, or event loop, that is the heart of any Twisted program. The first line of our program imports the reactor object so we can use it, and the second line tells the reactor to start running the loop.</P>
+    <P>This program just sits there doing nothing. You’ll have to stop it by pressing <TT>Control-C</TT>, otherwise it will just sit there forever. Normally we would have given the loop one or more file descriptors (connected to, say, a poetry server) that we want to monitor for I/O. We’ll see how to do that later, but for now our reactor loop is&nbsp;stuck. Note that this is not a <A href="http://en.wikipedia.org/wiki/Busy_waiting">busy loop</A> which keeps cycling over and over. If you happen to have a CPU meter on your screen, you won’t see any spikes caused by this technically infinite loop. In fact, our program isn’t using any CPU at all. Instead, the reactor is stuck at the top cycle of <A href="http://krondo.com/blog/?p=1247#figure5">Figure 5</A>, waiting for an event that will never come (to be specific, waiting on a <CODE>select</CODE> call with no file descriptors).</P>
+    <P>That might make for a compelling metaphor of Hamletian inaction, but it’s still a pretty boring program. We’re about to make it more interesting, but we can already draw a few conclusions:</P>
+    <OL>
+    <LI>Twisted’s reactor loop doesn’t start until told to. You start it by calling <CODE>reactor.run()</CODE>.</LI>
+    <LI>The reactor loop runs in the same thread it was started in. In this case, it runs in the main (and only) thread.</LI>
+    <LI>Once the loop starts up, it just keeps going. The reactor is now “in control” of the program (or the specific thread it was started in).</LI>
+    <LI>If it doesn’t have anything to do, the reactor loop does not consume CPU.</LI>
+    <LI>The reactor isn’t created explicitly, just imported.</LI>
+    </OL>
+    <P>That last point is worth elaborating on. In Twisted, the reactor is basically a <A href="http://en.wikipedia.org/wiki/Singleton_pattern">Singleton</A>. There is only one reactor object and it is created implicitly when you import it. If you open the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/reactor.py"><CODE>reactor</CODE></A> module in the <CODE>twisted.internet</CODE> package you will find very little code. The actual implementation resides in other files (starting with <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/selectreactor.py"><CODE>twisted.internet.selectreactor</CODE></A>).</P>
+    <P>Twisted actually contains multiple reactor implementations. As mentioned in Part 2, the <CODE>select</CODE> call is just one method of waiting on file descriptors. It is the default method that Twisted uses, but Twisted does include other reactors that use other methods. For example, <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/pollreactor.py"><CODE>twisted.internet.pollreactor</CODE></A> uses the <A href="http://www.makelinux.net/ldd3/chp-6-sect-3.shtml"><CODE>poll</CODE></A> system call instead of <CODE>select</CODE>.</P>
+    <P>To use an alternate reactor, you must <CODE>install</CODE> it <EM>before</EM> importing <CODE>twisted.internet.reactor</CODE>. Here is how you install the <CODE>pollreactor</CODE>:</P>
+    <PRE>from twisted.internet import pollreactor
+    pollreactor.install()</PRE>
+    <P>If you import <CODE>twisted.internet.reactor</CODE> without first installing a specific reactor implementation, then Twisted will install the <CODE>selectreactor</CODE> for you. For that reason, it is general practice not to import the reactor at the top level of modules to avoid accidentally installing the default reactor. Instead, import the reactor in the same scope in which you use it.</P>
+    <P style="padding-left: 30px;">Note: as of this writing, Twisted has been moving gradually towards an architecture which would allow multiple reactors to co-exist. In this scheme, a reactor object would be passed around as a reference rather than imported from a module.</P>
+    <P>Now we can re-implement our first Twisted program using the <CODE>pollreactor</CODE>, as found in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/simple-poll.py"><TT>basic-twisted/simple-poll.py</TT></A>:</P>
+    <PRE>from twisted.internet import pollreactor
+    pollreactor.install()
+
+    from twisted.internet import reactor
+    reactor.run()</PRE>
+    <P>And we have a poll loop that does nothing at all instead of a select loop that does nothing at all. Neato.</P>
+    <P>We’re going to stick with the default reactor for the rest of this introduction. For the purposes of learning Twisted, all the reactors do the same thing.</P>
+    <H3>Hello, Twisted</H3>
+    <P>Let’s make a Twisted program that at least does <EM>something</EM>. Here’s one that prints a message to the terminal window, after the reactor loop starts up:</P>
+    <PRE>def hello():
+        print 'Hello from the reactor loop!'
+        print 'Lately I feel like I\'m stuck in a rut.'
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(hello)
+
+    print 'Starting the reactor.'
+    reactor.run()</PRE>
+    <P>This program is in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/hello.py"><TT>basic-twisted/hello.py</TT></A>. If you run it, you will see this output:</P>
+    <PRE>Starting the reactor.
+    Hello from the reactor loop!
+    Lately I feel like I'm stuck in a rut.</PRE>
+    <P>You’ll still have to kill the program yourself, since it gets stuck again after printing those lines.</P>
+    <P>Notice the <CODE>hello</CODE> function is called after the reactor starts running. That means it is called by the reactor itself, so Twisted code must be calling our function. We arrange for this to happen by invoking the reactor method <CODE>callWhenRunning</CODE> with a reference to the function we want Twisted to call. And, of course, we have to do that before we start the reactor.</P>
+    <P>We use the term <EM>callback</EM> to describe the reference to the <CODE>hello</CODE> function. A callback is a function reference that we give to Twisted (or any other framework) that Twisted will use to “call us back” at the appropriate time, in this case right after the reactor loop starts up. Since Twisted’s loop is separate from our code, most interactions between the reactor core and our business logic will begin with a callback to a function we gave to Twisted using various APIs.</P>
+    <P>We can see how Twisted is calling our code using this program:</P>
+    <PRE>import traceback
+
+    def stack():
+        print 'The python stack:'
+        traceback.print_stack()
+
+    from twisted.internet import reactor
+    reactor.callWhenRunning(stack)
+    reactor.run()</PRE>
+    <P>You can find it in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/stack.py"><TT>basic-twisted/stack.py</TT></A> and it prints out something like this:</P>
+    <PRE>The python stack:
+    ...
+      reactor.run() &lt;-- This is where we called the reactor
+    ...
+    ...  &lt;-- A bunch of Twisted function calls
+    ...
+      traceback.print_stack() &lt;-- The second line in the stack function</PRE>
+    <P>Don’t worry about all the Twisted calls in between. Just notice the relationship between the <CODE>reactor.run()</CODE> call and our callback.</P>
+    <H5 style="padding-left: 30px;">What’s the deal with callbacks?</H5>
+    <P style="padding-left: 30px;">Twisted is not the only reactor framework that uses callbacks. The older asynchronous Python frameworks <A href="http://www.nightmare.com/medusa/">Medusa</A> and <A href="http://docs.python.org/library/asyncore.html#module-asyncore">asyncore</A> also use them. As do the GUI toolkits <A href="http://gtk.org/">GTK</A> and <A href="http://qt.nokia.com/">QT</A>, both based, like many GUI frameworks, on a reactor loop.</P>
+    <P style="padding-left: 30px;">The developers of reactive systems sure love callbacks. Maybe they should just marry them. Maybe they already did. But consider this:</P>
+    <OL style="padding-left: 30px">
+    <LI>The reactor pattern is single-threaded.</LI>
+    <LI>A reactive framework like Twisted implements the reactor loop so our code doesn’t have to.</LI>
+    <LI>Our code still needs to get called to implement our business logic.</LI>
+    <LI>Since it is “in control” of the single thread, the reactor loop will have to call our code.</LI>
+    <LI>The reactor can’t know in advance which part of our code needs to be called.</LI>
+    </OL>
+    <P style="padding-left: 30px">In this situation callbacks are not just one option — they are the only real game in town.</P>
+    <P>Figure 6 shows what happens during a callback:<A name="figure6"></A></P>
+    <DIV id="attachment_1421" class="wp-caption aligncenter" style="width: 227px"><A href="./part3_files/reactor-callback.png"><IMG class="size-full wp-image-1421" title="Figure 6: the reactor making a callback" src="./part3_files/reactor-callback.png" alt="Figure 6: the reactor making a callback" width="217" height="254"></A><P class="wp-caption-text">Figure 6: the reactor making a callback</P></DIV>
+    <P>Figure 6 illustrates some important properties of callbacks:</P>
+    <OL>
+    <LI>Our callback code runs in the same thread as the Twisted loop.</LI>
+    <LI>When our callbacks are running, the Twisted loop is not running.</LI>
+    <LI>And vice versa.</LI>
+    <LI>The reactor loop resumes when our callback returns.</LI>
+    </OL>
+    <P>During a callback, the Twisted loop is effectively “blocked” on our code. So we should make sure our callback code doesn’t waste any time. In particular, we should avoid making blocking I/O calls in our callbacks. Otherwise, we would be defeating the whole point of using the reactor pattern in the first place. Twisted will not take any special precautions to prevent our code from blocking, we just have to make sure not to do it. As we will eventually see, for the common case of network I/O we don’t have to worry about it as we let Twisted do the asynchronous communication for us.</P>
+    <P>Other examples of potentially blocking operations include reading or writing from a non-socket file descriptor (like a pipe) or waiting for a subprocess to finish. Exactly how you switch from blocking to non-blocking operations is specific to what you are doing, but there is often a Twisted API that will help you do it. Note that many standard Python functions have no way to switch to a non-blocking mode. For example, the <CODE>os.system</CODE> function will always block until the subprocess is finished. That’s just how it works. So when using Twisted, you will have to eschew <CODE>os.system</CODE> in favor of the Twisted API for launching subprocesses.</P>
+    <H3>Goodbye, Twisted</H3>
+    <P>It turns out you can tell the Twisted reactor to stop running by using the reactor’s <CODE>stop</CODE> method. But once stopped the reactor cannot be restarted, so it’s generally something you do only when your program needs to exit.</P>
+    <P style="padding-left: 30px;">Note: there has been past discussion on the Twisted mailing list about making the reactor “restartable” so it could be started and stopped as you like. But as of version 8.2.0, you can only start (and thus stop) the reactor once.</P>
+    <P>Here’s a program, listed in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/countdown.py"><TT>basic-twisted/countdown.py</TT></A>, which stops the reactor after a 5 second countdown:</P>
+    <PRE>class Countdown(object):
+
+        counter = 5
+
+        def count(self):
+            from twisted.internet import reactor
+            if self.counter == 0:
+                reactor.stop()
+            else:
+                print self.counter, '...'
+                self.counter -= 1
+                reactor.callLater(1, self.count)
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(Countdown().count)
+
+    print 'Start!'
+    reactor.run()
+    print 'Stop!'</PRE>
+    <P>This program uses the <CODE>callLater</CODE> API to register a callback with Twisted. With <CODE>callLater</CODE> the callback is the second argument and the first argument is the number of seconds in the future you would like your callback to run. You can use a floating point number to specify a fractional number of seconds, too.</P>
+    <P>So how does Twisted arrange to execute the callback at the right time? Since this program doesn’t listen on any file descriptors, why doesn’t it get stuck in the <CODE>select</CODE> loop like the others? The <CODE>select</CODE> call, and the others like it, also accepts an optional <EM>timeout</EM> value. If a timeout value is supplied and no file descriptors have become ready for I/O within the specified time then the <CODE>select</CODE> call will return anyway. Incidentally, by passing a timeout value of zero you can quickly check (or “poll”) a set of file descriptors without blocking at all.</P>
+    <P>You can think of a timeout as another kind of event the event loop of <A href="http://krondo.com/blog/?p=1247#figure5">Figure 5</A> is waiting for. And Twisted uses timeouts to make sure any “timed callbacks” registered with <CODE>callLater</CODE> get called at the right time. Or rather, at approximately the right time. If another callback takes a really long time to execute, a timed callback may be delayed past its schedule. Twisted’s <CODE>callLater</CODE> mechanism cannot provide the sort of guarantees required in a <A href="http://en.wikipedia.org/wiki/Real-time_computing#Hard_and_soft_real-time_systems">hard real-time</A> system.</P>
+    <P>Here is the output of our countdown program:</P>
+    <PRE>Start!
+    5 ...
+    4 ...
+    3 ...
+    2 ...
+    1 ...
+    Stop!</PRE>
+    <P>Note the “Stop!” line at the ends shows us that when the reactor exits, the <CODE>reactor.run</CODE> call returns. And we have a program that stops all by itself.</P>
+    <H3>Take That, Twisted</H3>
+    <P>Since Twisted often ends up calling our code in the form of callbacks, you might wonder what happens when a callback raises an exception. Let’s try it out. The program in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/exception.py"><TT>basic-twisted/exception.py</TT></A> raises an exception in one callback, but behaves normally in another:</P>
+    <PRE>def falldown():
+        raise Exception('I fall down.')
+
+    def upagain():
+        print 'But I get up again.'
+        reactor.stop()
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(falldown)
+    reactor.callWhenRunning(upagain)
+
+    print 'Starting the reactor.'
+    reactor.run()</PRE>
+    <P>When you run it at the command line, you will see this output:</P>
+    <PRE>Starting the reactor.
+    Traceback (most recent call last):
+      ... # I removed most of the traceback
+    exceptions.Exception: I fall down.
+    But I get up again.</PRE>
+    <P>Notice the second callback runs after the first, even though we see the traceback from the exception the first raised. And if you comment out the <CODE>reactor.stop()</CODE> call, the program will just keep running forever. So the reactor will keep going even when our callbacks fail (though it will report the exception).</P>
+    <P>Network servers generally need to be pretty robust pieces of software. They’re not supposed to crash whenever any random bug shows its head. That’s not to say we should be lackadaisical when it comes to handling our own errors, but it’s nice to know Twisted has our back.</P>
+    <H3>Poetry, Please</H3>
+    <P>Now we’re ready to grab some poetry with Twisted. In <A href="http://krondo.com/blog/?p=1445">Part 4</A>, we will implement a Twisted version of our asynchronous poetry client.</P>
+    <H3>Suggested Exercises</H3>
+    <OL>
+    <LI>Update the <TT>countdown.py</TT> program to have three independently running counters going at different rates. Stop the reactor when all counters have finished.</LI>
+    <LI>Consider the <CODE>LoopingCall</CODE> class in <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/task.py"><TT>twisted.internet.task</TT></A>. Rewrite the countdown program above to use <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/task.py#L23"><CODE>LoopingCall</CODE></A>. You only need the <CODE>start</CODE> and <CODE>stop</CODE> methods and you don’t need to use the “deferred” return value in any way. We’ll learn what a “deferred” value is in a later Part.</LI>
+    </OL>
