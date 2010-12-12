@@ -1,0 +1,215 @@
+======================================
+パート17: 「コールバック」ではない方法
+======================================
+..
+    <H2>Part 17: Just Another Way to Spell “Callback”</H2>
+    <H3>Introduction</H3>
+    <P>In this Part we’re going to return to the subject of callbacks. We’ll introduce another technique for writing callbacks in Twisted that uses <A href="http://docs.python.org/tutorial/classes.html#generators">generators</A>. We’ll show how the technique works and contrast it with using “pure” Deferreds. Finally we’ll rewrite one of our poetry clients using this technique. But first let’s review how generators work so we can see why they are a candidate for creating callbacks.</P>
+    <H4>A Brief Review of Generators</H4>
+    <P>As you probably know, a Python generator is a “restartable function” that you create by using the <CODE>yield</CODE> expression in the body of your function. By doing so, the function becomes a “generator function” that returns an <A href="http://docs.python.org/tutorial/classes.html#iterators">iterator</A> you can use to run the function in a series of steps. Each cycle of the iterator restarts the function, which proceeds to execute until it reaches the next <CODE>yield</CODE>.</P>
+    <P>Generators (and iterators) are often used to represent lazily-created sequences of values. Take a look at the example code in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/gen-1.py#L1"><TT>inline-callbacks/gen-1.py</TT></A>:</P>
+    <PRE>def my_generator():
+        print 'starting up'
+        yield 1
+        print "workin'"
+        yield 2
+        print "still workin'"
+        yield 3
+        print 'done'
+
+    for n in my_generator():
+        print n</PRE>
+    <P>Here we have a generator that creates the sequence 1, 2, 3. If you run the code, you will see the <CODE>print</CODE> statements in the generator interleaved with the <CODE>print</CODE> statement in the <CODE>for</CODE> loop as the loop cycles through the generator.</P>
+    <P>We can make this code more explicit by creating the generator ourselves (<A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/gen-2.py#L1"><TT>inline-callbacks/gen-2.py</TT></A>):</P>
+    <PRE>def my_generator():
+        print 'starting up'
+        yield 1
+        print "workin'"
+        yield 2
+        print "still workin'"
+        yield 3
+        print 'done'
+
+    gen = my_generator()
+
+    while True:
+        try:
+            n = gen.next()
+        except StopIteration:
+            break
+        else:
+            print n</PRE>
+    <P>Considered as a sequence, the generator is just an object for getting successive values. But we can also view things from the point of view of the generator itself:</P>
+    <OL>
+    <LI>The generator function doesn’t start running until “called” by the loop (using the <CODE>next</CODE> method).</LI>
+    <LI>Once the generator is running, it keeps running until it “returns” to the loop (using <CODE>yield</CODE>).</LI>
+    <LI>When the loop is running other code (like the <CODE>print</CODE> statement), the generator is not running.</LI>
+    <LI>When the generator is running, the loop is not running (it’s “blocked” waiting for the generator).</LI>
+    <LI>Once a generator <CODE>yield</CODE>s control to the loop, an arbitrary amount of time may pass (and an arbitrary amount of other code may execute) until the generator runs again.</LI>
+    </OL>
+    <P>This is very much like the way callbacks work in an asynchronous system. We can think of the <CODE>while</CODE> loop as the reactor, and the generator as a series of callbacks separated by <CODE>yield</CODE> statements, with the interesting fact that all the callbacks share the same local variable namespace, and the namespace persists from one callback to the next.</P>
+    <P>Furthermore, you can have multiple generators active at once (see the example in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/gen-3.py#L1"><TT>inline-callbacks/gen-3.py</TT></A>), with their “callbacks” interleaved with each other, just as you can have independent asynchronous tasks running in a system like Twisted.</P>
+    <P>Something is still missing, though. Callbacks aren’t just called by the reactor, they also receive information. When part of a deferred’s chain, a callback either receives a result, in the form of a single Python value, or an error, in the form of a <CODE>Failure</CODE>.</P>
+    <P>Starting with Python 2.5, generators were extended in a way that allows you to send information to a generator when you restart it, as illustrated in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/gen-4.py#L1"><TT>inline-callbacks/gen-4.py</TT></A>:</P>
+    <PRE>class Malfunction(Exception):
+        pass
+
+    def my_generator():
+        print 'starting up'
+
+        val = yield 1
+        print 'got:', val
+
+        val = yield 2
+        print 'got:', val
+
+        try:
+            yield 3
+        except Malfunction:
+            print 'malfunction!'
+
+        yield 4
+
+        print 'done'
+
+    gen = my_generator()
+
+    print gen.next() # start the generator
+    print gen.send(10) # send the value 10
+    print gen.send(20) # send the value 20
+    print gen.throw(Malfunction()) # raise an exception inside the generator
+
+    try:
+        gen.next()
+    except StopIteration:
+        pass</PRE>
+    <P>In Python 2.5 and later versions, the <CODE>yield</CODE> statement is an expression that evaluates to a value. And the code that restarts the generator can determine that value using the <CODE>send</CODE> method instead of <CODE>next</CODE> (if you use <CODE>next</CODE> the value is <CODE>None</CODE>). What’s more, you can actually raise an arbitrary exception <EM>inside</EM> the generator using the <CODE>throw</CODE> method. How cool is that?</P>
+    <H3>Inline Callbacks</H3>
+    <P>Given what we just reviewed about <CODE>send</CODE>ing and <CODE>throw</CODE>ing values and exceptions into a generator, we can envision a generator as a series of callbacks, like the ones in a deferred, which receive either results or failures. The callbacks are separated by <CODE>yield</CODE>s and the value of each <CODE>yield</CODE> expression is the result for the next callback (or the <CODE>yield</CODE> raises an exception and that’s the failure). Figure 35 shows the correspondence:</P>
+    <DIV id="attachment_2461" class="wp-caption aligncenter" style="width: 438px"><A href="./part17_files/generator-callbacks1.png"><IMG class="size-full wp-image-2461" title="Figure 35: generator as a callback sequence" src="./part17_files/generator-callbacks1.png" alt="Figure 35: generator as a callback sequence" width="428" height="235"></A><P class="wp-caption-text">Figure 35: generator as a callback sequence</P></DIV>
+    <P>Now when a series of callbacks is chained together in a deferred, each callback receives the result from the one prior. That’s easy enough to do with a generator — just <CODE>send</CODE> the value you got from the previous run of the generator (the value it <CODE>yield</CODE>ed) the next time you restart it. But that also seems a bit silly. Since the generator computed the value to begin with, why bother sending it back? The generator could just save the value in a variable for the next time it’s needed. So what’s the point?</P>
+    <P>Recall the fact we learned in <A href="http://krondo.com/blog/?p=2159">Part 13</A>, that the callbacks in a deferred can return deferreds themselves. And when that happens, the outer deferred is paused until the inner deferred fires, and then the next callback (or errback) in the outer deferred’s chain is called with the result (or failure) from the inner deferred.</P>
+    <P>So imagine that our generator <CODE>yield</CODE>s a deferred object instead of an ordinary Python value. The generator is now “paused”, and that’s automatic; generators always pause after every <CODE>yield</CODE> statement until they are explicitly restarted. So we can delay restarting the generator until the deferred fires, at which point we either <CODE>send</CODE> the value (if the deferred succeeds) or <CODE>throw</CODE> the exception (if the deferred fails). That would make our generator a genuine sequence of asynchronous callbacks and that’s the idea behind the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#L973"><CODE>inlineCallbacks</CODE></A> function in <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py"><CODE>twisted.internet.defer</CODE></A>.</P>
+    <H4>inlineCallbacks</H4>
+    <P>Consider the example program in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/inline-callbacks-1.py#L1"><TT>inline-callbacks/inline-callbacks-1.py</TT></A>:</P>
+    <PRE>from twisted.internet.defer import inlineCallbacks, Deferred
+
+    @inlineCallbacks
+    def my_callbacks():
+        from twisted.internet import reactor
+
+        print 'first callback'
+        result = yield 1 # yielded values that aren't deferred come right back
+
+        print 'second callback got', result
+        d = Deferred()
+        reactor.callLater(5, d.callback, 2)
+        result = yield d # yielded deferreds will pause the generator
+
+        print 'third callback got', result # the result of the deferred
+
+        d = Deferred()
+        reactor.callLater(5, d.errback, Exception(3))
+
+        try:
+            yield d
+        except Exception, e:
+            result = e
+
+        print 'fourth callback got', repr(result) # the exception from the deferred
+
+        reactor.stop()
+
+    from twisted.internet import reactor
+    reactor.callWhenRunning(my_callbacks)
+    reactor.run()</PRE>
+    <P>Run the example and you will see the generator execute to the end and then stop the reactor. The example illustrates several aspects of the <CODE>inlineCallbacks</CODE> function. First, <CODE>inlineCallbacks</CODE> is a decorator and it always decorates generator functions, i.e., functions that use <CODE>yield</CODE>. The whole purpose of <CODE>inlineCallbacks</CODE> is turn a generator into a series of asynchronous callbacks according to the scheme we outlined before.</P>
+    <P>Second, when we invoke an <CODE>inlineCallbacks</CODE>-decorated function, we don’t need to call <CODE>next</CODE> or <CODE>send</CODE> or <CODE>throw</CODE> ourselves. The decorator takes care of those details for us and ensures the generator will run to the end (assuming it doesn’t raise an exception).</P>
+    <P>Third, if we <CODE>yield</CODE> a non-deferred value from the generator, it is immediately restarted with that same value as the result of the <CODE>yield</CODE>.</P>
+    <P>And finally, if we <CODE>yield</CODE> a deferred from the generator, it will not be restarted until that deferred fires. If the deferred succeeds, the result of the <CODE>yield</CODE> is just the result from the deferred. And if the deferred fails, the <CODE>yield</CODE> statement raises the exception. Note the exception is just an ordinary <CODE>Exception</CODE> object, rather than a <CODE>Failure</CODE>, and we can catch it with a <CODE>try</CODE>/<CODE>except</CODE> statement around the <CODE>yield</CODE> expression.</P>
+    <P>In the example we are just using <CODE>callLater</CODE> to fire the deferreds after a short period of time. While that’s a handy way to put in a non-blocking delay into our callback chain, normally we would be <CODE>yield</CODE>ing a deferred returned by some other asynchronous operation (i.e., <CODE>get_poetry</CODE>) invoked from our generator.</P>
+    <P>Ok, now we know how an <CODE>inlineCallbacks</CODE>-decorated function runs, but what return value do you get if you actually call one? As you might have guessed, you get a deferred. Since we can’t know exactly when that generator will stop running (it might <CODE>yield</CODE> one or more deferreds), the decorated function itself is asynchronous and a deferred is the appropriate return value. Note the deferred that is returned isn’t one of the deferreds the generator may <CODE>yield</CODE>. Rather, it’s a deferred that fires only after the generator has completely finished (or throws an exception).</P>
+    <P>If the generator throws an exception, the returned deferred will fire its errback chain with that exception wrapped in a <CODE>Failure</CODE>. But if we want the generator to return a normal value, we must “return” it using the <CODE>defer.returnValue</CODE> function. Like the ordinary <CODE>return</CODE> statement, it will also stop the generator (it actually raises a special exception). The <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/inline-callbacks-2.py#L1"><TT>inline-callbacks/inline-callbacks-2.py</TT></A> example illustrates both possibilities.</P>
+    <H3>Client 7.0</H3>
+    <P>Let’s put <CODE>inlineCallbacks</CODE> to work with a new version of our poetry client. You can see the code in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L1"><TT>twisted-client-7/get-poetry.py</TT></A>. You may wish to compare it to client 6.0 in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L151"><TT>twisted-client-6/get-poetry.py</TT></A>. The relevant changes are in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L151"><CODE>poetry_main</CODE></A>:</P>
+    <PRE>def poetry_main():
+        addresses = parse_args()
+
+        xform_addr = addresses.pop(0)
+
+        proxy = TransformProxy(*xform_addr)
+
+        from twisted.internet import reactor
+
+        results = []
+
+        @defer.inlineCallbacks
+        def get_transformed_poem(host, port):
+            try:
+                poem = yield get_poetry(host, port)
+            except Exception, e:
+                print &gt;&gt;sys.stderr, 'The poem download failed:', e
+                raise
+
+            try:
+                poem = yield proxy.xform('cummingsify', poem)
+            except Exception:
+                print &gt;&gt;sys.stderr, 'Cummingsify failed!'
+
+            defer.returnValue(poem)
+
+        def got_poem(poem):
+            print poem
+
+        def poem_done(_):
+            results.append(_)
+            if len(results) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            d = get_transformed_poem(host, port)
+            d.addCallbacks(got_poem)
+            d.addBoth(poem_done)
+
+        reactor.run()</PRE>
+    <P>In our new version the <CODE>inlineCallbacks</CODE> generator function <CODE>get_transformed_poem</CODE> is responsible for both fetching the poem and then applying the transformation (via the transform service). Since both operations are asynchronous, we yield a deferred each time and then (implicitly) wait for the result. As in client 6.0, if the transformation fails we just return the original poem. Notice we can use <CODE>try</CODE>/<CODE>except</CODE> statements to handle asynchronous errors inside the generator.</P>
+    <P>We can test the new client out in the same way as before. First start up a transform server:</P>
+    <PRE>python twisted-server-1/tranformedpoetry.py --port 10001</PRE>
+    <P>Then start a couple of poetry servers:</P>
+    <PRE>python twisted-server-1/fastpoetry.py --port 10002 poetry/fascination.txt
+    python twisted-server-1/fastpoetry.py --port 10003 poetry/science.txt</PRE>
+    <P>Now you can run the new client:</P>
+    <PRE>python twisted-client-7/get-poetry.py 10001 10002 10003</PRE>
+    <P>Try turning off one or more of the servers to see how the client handles errors.</P>
+    <H3>Discussion</H3>
+    <P>Like the <CODE>Deferred</CODE> object, the <CODE>inlineCallbacks</CODE> function gives us a new way of organizing our asynchronous callbacks. And, as with deferreds, <CODE>inlineCallbacks</CODE> doesn’t change the rules of the game. Specifically, our callbacks still run one at a time, and they are still invoked by the reactor. We can confirm that fact in our usual way by printing out a traceback from an inline callback, as in the example script <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/inline-callbacks-tb.py#L1"><TT>inline-callbacks/inline-callbacks-tb.py</TT></A>. Run that code and you will get a traceback with <CODE>reactor.run()</CODE> at the top, lots of helper functions in between, and our callback at the bottom.</P>
+    <P>We can adapt Figure 29, which explains what happens when one callback in a deferred returns another deferred, to show what happens when an <CODE>inlineCallbacks</CODE> generator <CODE>yield</CODE>s a deferred. See Figure 36:</P>
+    <DIV id="attachment_2533" class="wp-caption alignnone" style="width: 639px"><A href="./part17_files/inline-callbacks1.png"><IMG class="size-full wp-image-2533" title="Figure 36: flow control in an inlineCallbacks function" src="./part17_files/inline-callbacks1.png" alt="Figure 36: flow control in an inlineCallbacks function" width="629" height="582"></A><P class="wp-caption-text">Figure 36: flow control in an inlineCallbacks function</P></DIV>
+    <P>The same figure works in both cases because the idea being illustrated is the same — one asynchronous operation is waiting for another.</P>
+    <P>Since <CODE>inlineCallbacks</CODE> and deferreds solve many of the same problems, why choose one over the other? Here are some potential advantages of <CODE>inlineCallbacks</CODE>:</P>
+    <UL>
+    <LI>Since the callbacks share a namespace, there is no need to pass extra state around.</LI>
+    <LI>The callback order is easier to see, as they just execute from top to bottom.</LI>
+    <LI>With no function declarations for individual callbacks and implicit flow-control, there is generally less typing.</LI>
+    <LI>Errors are handled with the familiar <CODE>try</CODE>/<CODE>except</CODE> statement.</LI>
+    </UL>
+    <P>And here are some potential pitfalls:</P>
+    <UL>
+    <LI>The callbacks inside the generator cannot be invoked individually, which could make code re-use difficult. With a deferred, the code constructing the deferred is free to add arbitrary callbacks in an arbitrary order.</LI>
+    <LI>The compact form of a generator can obscure the fact that an asynchronous callback is even involved. Despite its visually similar appearance to an ordinary sequential function, a generator behaves in a very different manner. The <CODE>inlineCallbacks</CODE> function is not a way to avoid learning the asynchronous programming model.</LI>
+    </UL>
+    <P>As with any technique, practice will provide the experience necessary to make an informed choice.</P>
+    <H3>Summary</H3>
+    <P>In this Part we learned about the <CODE>inlineCallbacks</CODE> decorator and how it allows us to express a sequence of asynchronous callbacks in the form of a Python generator.</P>
+    <P>In <A href="http://krondo.com/blog/?p=2571">Part 18</A> we will learn a technique for managing a set of “parallel” asynchronous operations.</P>
+    <H3>Suggested Exercises</H3>
+    <OL>
+    <LI>Why is the <CODE>inlineCallbacks</CODE> function plural?</LI>
+    <LI>Study the implementation of <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#973"><CODE>inlineCallbacks</CODE></A> and its helper function <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#L874"><CODE>_inlineCallbacks</CODE></A>. Ponder the phrase “the devil is in the details”.</LI>
+    <LI>How many callbacks are contained in a generator with <STRONG>N</STRONG> <CODE>yield</CODE> statements, assuming it has no loops or <CODE>if</CODE> statements?</LI>
+    <LI>Poetry client 7.0 might have three generators running at once. Conceptually, how many different ways might they be interleaved with one another? Considering the way they are invoked in the poetry client and the implementation of <CODE>inlineCallbacks</CODE>, how many ways do you think are actually possible?</LI>
+    <LI>Move the <CODE>got_poem</CODE> callback in client 7.0 inside the generator.</LI>
+    <LI>Then move the <CODE>poem_done</CODE> callback inside the generator. Be careful! Make sure to handle all the failure cases so the reactor gets shutdown no matter what. How does the resulting code compare to using a deferred to shutdown the reactor?</LI>
+    <LI>A generator with <CODE>yield</CODE> statements inside a <CODE>while</CODE> loop can represent a conceptually infinite sequence. What does such a generator decorated with <CODE>inlineCallbacks</CODE> represent?</LI>
+    </OL>

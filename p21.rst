@@ -1,0 +1,106 @@
+============================
+パート21: Twisted と Haskell
+============================
+..
+    <h2 class="lwe-editable-pre">Part 21: Lazy is as Lazy Doesn’t: Twisted and Haskell</h2>
+    <h3 class="lwe-editable-pre">Introduction</h3>
+    <p class="lwe-editable-pre">In the last Part we compared Twisted with <a href="http://erlang.org/" class="lwe-editable-pre">Erlang</a>, giving most of our attention to some ideas they have in common. And that ended up being pretty simple, as asynchronous I/O and reactive programming are key components of the Erlang runtime and process model.</p>
+    <p class="lwe-editable-pre">Today we are going to range further afield and look at <a href="http://haskell.org/" class="lwe-editable-pre">Haskell</a>, another functional language that is nevertheless quite different from Erlang (and, of course, Python). There won’t be as many parallels, but we will nevertheless find some asynchronous I/O hiding under the covers.</p>
+    <h3 class="lwe-editable-pre">Functional with a Capital F</h3>
+    <p class="lwe-editable-pre">Although Erlang is also a functional language, its main focus is a reliable concurrency model. Haskell, on the other hand, is functional through and through, making unabashed use of concepts from <a href="http://en.wikipedia.org/wiki/Category_theory" class="lwe-editable-pre">category theory</a> like <a href="http://en.wikipedia.org/wiki/Functor" class="lwe-editable-pre">functors</a> and <a href="http://en.wikipedia.org/wiki/Monad_%28category_theory%29" class="lwe-editable-pre">monads</a>.</p>
+    <p class="lwe-editable-pre">Don’t worry, we’re not going into any of that here (as if we could). Instead we’ll focus on one of Haskell’s more traditionally functional features: laziness. Like many functional languages (but unlike Erlang), Haskell supports <a href="http://en.wikipedia.org/wiki/Lazy_evaluation" class="lwe-editable-pre">lazy evaluation</a>. In a lazily evaluated language the text of a program doesn’t so much describe how to compute something as what to compute. The details of actually performing the computation are generally left to the compiler and runtime system.</p>
+    <p class="lwe-editable-pre">And, more to the point, as a lazily-evaluated computation proceeds the runtime may evaluate expressions only partially (lazily) instead of all at once. In general, the runtime will evaluate only as much of an expression as is needed to make progress on the current computation.</p>
+    <p class="lwe-editable-pre">Here is a simple Haskell statement applying <code class="lwe-editable-pre">head</code>, a function that retrieves the first element of a list, to the list <code class="lwe-editable-pre">[1,2,3]</code> (Haskell and Python share some of their list syntax):</p>
+    <pre class="lwe-editable-pre">  head [1,2,3]
+    </pre>
+    <p class="lwe-editable-pre">If you install the <a href="http://www.haskell.org/ghc/" class="lwe-editable-pre">GHC</a> Haskell runtime, you can try this out yourself:</p>
+    <pre class="lwe-editable-pre">[~] ghci
+    GHCi, version 6.12.1: http://www.haskell.org/ghc/  : ? for help
+    Loading package ghc-prim ... linking ... done.
+    Loading package integer-gmp ... linking ... done.
+    Loading package base ... linking ... done.
+    Prelude&gt; head [1,2,3]
+    1
+    Prelude&gt;
+    </pre>
+    <p class="lwe-editable-pre">The result is the number 1, as expected.</p>
+    <p class="lwe-editable-pre">The Haskell list syntax includes the handy ability to define a list from its first couple of elements. For example, the list <code class="lwe-editable-pre">[2,4 ..]</code> is the sequence of even numbers starting with 2. Where does it end? Well, it doesn’t. The Haskell list [2,4 ..] and others like it represent (conceptually) infinite lists. You can see this if you try to evaluate one at the interactive Haskell prompt, which will attempt to print out the result of your expression:</p>
+    <pre class="lwe-editable-pre">Prelude&gt; [2,4 ..]
+    [2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84,86,88,90,92,94,96,98,100,102,104,106,108,110,112,114,116,118,120,122,124,126,128,130,132,134,136,138,140,142,144,146,
+    ...
+    </pre>
+    <p class="lwe-editable-pre">You'll have to press <tt class="lwe-editable-pre">Ctrl-C</tt> to stop that computation as it will never actually terminate. But because of lazy evaluation, it is possible to use these infinite lists in Haskell with no trouble:</p>
+    <pre class="lwe-editable-pre">Prelude&gt; head [2,4 ..]
+    2
+    Prelude&gt; head (tail [2,4 ..])
+    4
+    Prelude&gt; head (tail (tail [2,4 ..]))
+    6
+    </pre>
+    <p class="lwe-editable-pre">Here we are accessing the first, second, and third elements of this infinite list respectively, with no infinite loop anywhere in sight. This is the essence of lazy evaluation. Instead of first evaluating the entire list (which would cause an infinite loop) and then giving that list to the <code class="lwe-editable-pre">head</code> function, the Haskell runtime only constructs as much of the list as it needs for <code class="lwe-editable-pre">head</code> to finish its work. The rest of the list is never constructed at all, because it is not needed to proceed with the computation.</p>
+    <p class="lwe-editable-pre">When we bring the <code class="lwe-editable-pre">tail</code> function into play, Haskell is forced to construct the list further, but again only as much as it needs to evaluate the next step of the computation. And once the computation is done, the (unfinished) list can be discarded.</p>
+    <p class="lwe-editable-pre">Here’s some Haskell code that partially consumes three different infinite lists:</p>
+    <pre class="lwe-editable-pre">Prelude&gt; let x = [1..]
+    Prelude&gt; let y = [2,4 ..]
+    Prelude&gt; let z = [3,6 ..]
+    Prelude&gt; head (tail (tail (zip3 x y z)))
+    (3,6,9)
+    </pre>
+    <p class="lwe-editable-pre">Here we zip all the lists together, then grab the head of the tail of the tail. Once again, Haskell has no trouble with this and only constructs as much of each list as it needs to finish evaluating our code. We can visualize the Haskell runtime “consuming” these infinite lists in Figure 46:</p>
+    <div id="attachment_2846" class="wp-caption aligncenter" style="width: 477px"><a href="./part21_files/haskell.png"><img class="size-full wp-image-2846" title="Figure 46: Haskell consuming some infinite lists" src="./part21_files/haskell.png" alt="Figure 46: Haskell consuming some infinite lists" width="467" height="177"></a><p class="wp-caption-text lwe-editable-pre">Figure 46: Haskell consuming some infinite lists</p></div>
+    <p class="lwe-editable-pre">Although we’ve drawn the Haskell runtime as a simple loop, it might be implemented with multiple threads (and probably is if you are using the GHC version of Haskell). But the main point to notice is how this figure looks like a reactor loop consuming bits of data as they come in on network sockets.</p>
+    <p class="lwe-editable-pre">You can think of asynchronous I/O and the reactor pattern as a very limited form of lazy evaluation. The asynchronous I/O motto is: “Only process as much data as you have”. And the lazy evaluation motto is: “Only process as much data as you need”. Furthermore, a lazily-evaluated language applies that motto almost everywhere, not just in the limited scope of I/O.</p>
+    <p class="lwe-editable-pre">But the point is that, for a lazily-evaluated language, making use of asynchronous I/O is no big deal. The compiler and runtime are already designed to process data structures bit by bit, so lazily processing the incoming chunks of an I/O stream is just par for the course. And thus the Haskell runtime, like the Erlang runtime, simply incorporates asynchronous I/O as part of its socket abstractions. And we can show that by implementing a poetry client in Haskell.</p>
+    <h3 class="lwe-editable-pre">Haskell Poetry</h3>
+    <p class="lwe-editable-pre">Our first Haskell poetry client is located in <a href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs" class="lwe-editable-pre"><tt class="lwe-editable-pre">haskell-client-1/get-poetry.hs</tt></a>. As with Erlang, we’re going to jump straight to a finished client, and then suggest further reading if you’d like to learn more.</p>
+    <p class="lwe-editable-pre">Haskell also supports light-weight threads or processes, though they aren’t as central to Haskell as they are to Erlang, and our Haskell client creates one process for each poem we want to download. The key function there is <a href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L64" class="lwe-editable-pre"><code class="lwe-editable-pre">runTask</code></a> which connects to a socket and starts the <a href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L48" class="lwe-editable-pre"><code class="lwe-editable-pre">getPoetry</code></a> function in a light-weight thread.</p>
+    <p class="lwe-editable-pre">You’ll notice a lot of type declarations in this code. Haskell, unlike Python or Erlang, is statically typed. We don’t declare types for each and every variable because Haskell will automatically infer types not explicitly declared (or report an error if it can’t). A number of the functions include the <code class="lwe-editable-pre">IO</code> type (technically a monad) because Haskell requires us to cleanly separate code with side-effects (i.e., code that performs I/O) from pure functions.</p>
+    <p class="lwe-editable-pre">The <code class="lwe-editable-pre">getPoetry</code> function includes this line:</p>
+    <pre class="lwe-editable-pre">poem &lt;- hGetContents h
+    </pre>
+    <p class="lwe-editable-pre">which appears to be reading the entire poem from the handle (i.e., the TCP socket) at once. But Haskell, as usual, is lazy. And the Haskell runtime includes one or more actual threads which perform asynchronous I/O in a <code class="lwe-editable-pre">select</code> loop, thus preserving the possibilities for lazy evaluation of I/O streams.</p>
+    <p class="lwe-editable-pre">Just to illustrate that asynchronous I/O is really going on, we have included a “callback” function, <a href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L60" class="lwe-editable-pre"><code class="lwe-editable-pre">gotLine</code></a>, that prints out some task information for each line in the poem. But it’s not really a callback function at all, and the program would use asynchronous I/O whether we included it or not. Even calling it “gotLine” reflects an imperative-language mindset that is out of place in a Haskell program. No matter, we’ll clean it up in a bit, but let’s take our first Haskell client out for a spin. Start up some slow poetry servers:</p>
+    <pre class="lwe-editable-pre">python blocking-server/slowpoetry.py --port 10001 poetry/fascination.txt
+    python blocking-server/slowpoetry.py --port 10002 poetry/science.txt
+    python blocking-server/slowpoetry.py --port 10003 poetry/ecstasy.txt --num-bytes 30</pre>
+    <p class="lwe-editable-pre">Now compile the Haskell client:</p>
+    <pre class="lwe-editable-pre">cd haskell-client-1/
+    ghc --make get-poetry.hs
+    </pre>
+    <p class="lwe-editable-pre">This will create a binary called <code class="lwe-editable-pre">get-poetry</code>. Finally, run the client against our servers:</p>
+    <pre class="lwe-editable-pre">./get-poetry 10001 10002 1000</pre>
+    <p class="lwe-editable-pre">And you should see some output like this:</p>
+    <pre class="lwe-editable-pre">Task 3: got 12 bytes of poetry from localhost:10003
+    Task 3: got 1 bytes of poetry from localhost:10003
+    Task 3: got 30 bytes of poetry from localhost:10003
+    Task 2: got 20 bytes of poetry from localhost:10002
+    Task 3: got 44 bytes of poetry from localhost:10003
+    Task 2: got 1 bytes of poetry from localhost:10002
+    Task 3: got 29 bytes of poetry from localhost:10003
+    Task 1: got 36 bytes of poetry from localhost:10001
+    Task 1: got 1 bytes of poetry from localhost:10001
+    ...</pre>
+    <p class="lwe-editable-pre">The output is slightly different than previous asynchronous clients because we are printing one line for each line of poetry instead of each arbitrary chunk of data. But, as you can see, the client is clearly processing data from all the servers together, instead of one after the other. You’ll also notice that the client prints out the first poem as soon as it’s finished, without waiting for the others, which continue on at their own pace.</p>
+    <p class="lwe-editable-pre">Alright, let’s clean the remaining bits of imperative cruft from our client and present a version which just grabs the poetry without bothering with task numbers. You can find it in <a href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-2/get-poetry.hs" class="lwe-editable-pre"><tt class="lwe-editable-pre">haskell-client-2/get-poetry.hs</tt></a>. Notice that it’s much shorter and, for each server, just connects to the socket, grabs all the data, and sends it back.</p>
+    <p class="lwe-editable-pre">Ok, let’s compile a new client:</p>
+    <pre class="lwe-editable-pre">cd haskell-client-2/
+    ghc --make get-poetry.hs
+    </pre>
+    <p class="lwe-editable-pre">And run it against the same set of poetry servers:</p>
+    <pre class="lwe-editable-pre">./get-poetry 10001 10002 10003</pre>
+    <p class="lwe-editable-pre">And you should see the text of each poem appear, eventually, on the screen.</p>
+    <p class="lwe-editable-pre">You will notice from the server output that each server is sending data to the client simultaneously. What’s more, the client prints out each line of the first poem as soon as possible, without waiting for the rest of the poem, even while it’s working on the other two. And then it quickly prints out the second poem, which it has been accumulating all along.</p>
+    <p class="lwe-editable-pre">And all of that happens without us having to do much of anything. There are no callbacks, no messages being passed back and forth, just a concise description of what we want the program to do, and very little in the way of how it should go about doing it. The rest is taken care of by the Haskell compiler and runtime. Nifty.</p>
+    <h3 class="lwe-editable-pre">Discussion and Further Reading</h3>
+    <p class="lwe-editable-pre">In moving from Twisted to Erlang to Haskell we can see a parallel movement, from the foreground to the background, of the ideas behind asynchronous programming. In Twisted, asynchronous programming is the central motivating idea behind Twisted’s existence. And Twisted’s implementation as a framework separate from Python (and Python’s lack of core asynchronous abstractions like lightweight threads) keeps the asynchronous model front and center when you write programs using Twisted.</p>
+    <p class="lwe-editable-pre">In Erlang, asynchronicity is still very visible to the programmer, but the details are now part of the fabric of the language and runtime system, enabling an abstraction in which asynchronous messages are exchanged between synchronous processes.</p>
+    <p class="lwe-editable-pre">And finally, in Haskell, asynchronous I/O is just another technique inside the runtime, largely unseen by the programmer, for providing the lazy evaluation that is one of Haskell’s central ideas.</p>
+    <p class="lwe-editable-pre">We don’t have any profound insight into this situation, we’re just pointing out the many and interesting places where the asynchronous model shows up, and the many different ways it can be expressed.</p>
+    <p class="lwe-editable-pre">And if any of this has piqued your interest in Haskell, then we can recommend <a href="http://www.amazon.com/exec/obidos/ASIN/0596514980/krondonet-20" class="lwe-editable-pre">Real World Haskell</a> to continue your studies. The book is a model of what a good language introduction should be. And while I haven’t read it, I’ve heard good things about <a href="http://learnyouahaskell.com/" class="lwe-editable-pre">Learn You a Haskell</a>.</p>
+    <p class="lwe-editable-pre">This brings us to the end of our tour of asynchronous systems outside of Twisted, and the penultimate part in our series. In <a href="http://krondo.com/blog/?p=2874" class="lwe-editable-pre">Part 22</a> we will conclude, and suggest ways to learn more about Twisted.</p>
+    <h3 class="lwe-editable-pre">Suggested Exercises for the Startlingly Motivated</h3>
+    <ol class="">
+    <li class="lwe-editable-pre">Compare the Twisted, Erlang, and Haskell clients with each other.</li>
+    <li class="lwe-editable-pre">Modify the Haskell clients to handle failures to connect to a poetry server so they download all the poetry they can and output reasonable error messages for the poems they can’t.</li>
+    <li class="lwe-editable-pre">Write Haskell versions of the poetry servers we made with Twisted.</li>
+    </ol>
