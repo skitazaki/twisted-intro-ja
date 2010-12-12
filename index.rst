@@ -12,7 +12,6 @@ Twisted 入門
 
 .. _Twisted: http://twistedmatrix.com/
 
-
 目次:
 
 .. toctree::
@@ -32,4 +31,11 @@ Twisted 入門
     詩の変換サーバー <p12>
     Deferred と行こう <p13>
     Deferred が無かったら <p14>
-    詩のテスト <p15>
+    テストされた詩 <p15>
+    Twisted をデーモン化する <p16>
+    「コールバック」ではない方法 <p17>
+    Deferreds En Masse <p18>
+    欲しいと思っていても考えを改めると <p19>
+    車輪の中の車輪: Twisted と Erlang <p20>
+    Twisted と Haskell <p21>
+    おわりに <p22>
