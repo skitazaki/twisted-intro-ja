@@ -3,7 +3,13 @@
 ============================================
 ..
     <h2 class="lwe-editable-pre">Part 19: I Thought I Wanted It But I Changed My Mind</h2>
+
+はじめに
+========
+..
     <h3 class="lwe-editable-pre">Introduction</h3>
+
+..
     <p class="lwe-editable-pre">Twisted is an ongoing project and the Twisted developers regularly add new features and extend old ones. With the release of Twisted 10.1.0, the developers added a new capability — cancellation — to the <code class="lwe-editable-pre">Deferred</code> class which we’re going to investigate today.</p>
     <p class="lwe-editable-pre">Asynchronous programming decouples requests from responses and thus raises a new possibility: between asking for the result and getting it back you might decide you don’t want it anymore. Consider the poetry proxy server from <a href="http://krondo.com/blog/?p=2205" class="lwe-editable-pre">Part 14</a>. Here’s how the proxy worked, at least for the first request of a poem:</p>
     <ol class="">
@@ -17,7 +23,13 @@
     <p class="lwe-editable-pre">Of course, in a synchronous program that isn’t possible because the high-level code doesn’t even resume running until the low-level operation is finished, at which point there is nothing to cancel. But in an asynchronous program the high-level code gets control of the program before the low-level code is done, which at least raises the possibility of canceling the low-level request before it finishes.</p>
     <p class="lwe-editable-pre">In a Twisted program, the lower-level request is embodied by a <code class="lwe-editable-pre">Deferred</code> object, which you can think of as a “handle” on the outstanding asynchronous operation. The normal flow of information in a deferred is downward, from low-level code to high-level code, which matches the flow of return information in a synchronous program. Starting in Twisted 10.1.0, high-level code can send information back the other direction — it can tell the low-level code it doesn’t want the result anymore. See Figure 39:</p>
     <div id="attachment_2621" class="wp-caption alignnone" style="width: 406px"><a href="./part19_files/deferred-cancel.png"><img class="size-full wp-image-2621" title="Figure 39: Information flow in a deferred, including cancellation" src="./part19_files/deferred-cancel.png" alt="Figure 39: Information flow in a deferred, including cancellation" width="396" height="242"></a><p class="wp-caption-text lwe-editable-pre">Figure 39: Information flow in a deferred, including cancellation</p></div>
+
+遅延オブジェクトをキャンセルする
+================================
+..
     <h3 class="lwe-editable-pre">Canceling Deferreds</h3>
+
+..
     <p class="lwe-editable-pre">Let’s take a look at a few sample programs to see how canceling deferreds actually works. Note, to run the examples and other code in this Part you will need a <a href="http://twistedmatrix.com/trac/wiki/Downloads" class="lwe-editable-pre">version</a> of Twisted 10.1.0 or later. Consider <a href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-1.py#L1" class="lwe-editable-pre"><tt class="lwe-editable-pre">deferred-cancel/defer-cancel-1.py</tt></a>:</p>
     <pre class="lwe-editable-pre">from twisted.internet import defer
 
@@ -97,7 +109,13 @@
     <p class="lwe-editable-pre">Since older Twisted code is going to go ahead and fire that canceled deferred anyway, step #1 ensures our program won’t blow up if we cancel a deferred we got from an older library.</p>
     <p class="lwe-editable-pre">This means we are always free to cancel a deferred, and we’ll be sure not to get the result if it hasn’t arrived (even if it arrives later). But canceling the deferred might not actually cancel the asynchronous operation. Aborting an asynchronous operation requires a context-specific action. You might need to close a network connection, roll back a database transaction, kill a sub-process, et cetera. And since a deferred is just a general-purpose callback organizer, how is it supposed to know what specific action to take when you cancel it? Or, alternatively, how could it forward the cancel request to the lower-level code that created and returned the deferred in the first place? Say it with me now:</p>
     <blockquote class="lwe-editable-pre"><p class="lwe-editable-pre">I know, with a callback!</p></blockquote>
+
+遅延オブジェクトをキャンセルする、本当に
+========================================
+..
     <h3 class="lwe-editable-pre">Canceling Deferreds, Really</h3>
+
+..
     <p class="lwe-editable-pre">Alright, take a look at <a href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-5.py#L1" class="lwe-editable-pre"><tt class="lwe-editable-pre">deferred-cancel/defer-cancel-5.py</tt></a>:</p>
     <pre class="lwe-editable-pre">from twisted.internet import defer
 
@@ -190,7 +208,13 @@
     <pre class="lwe-editable-pre">get_poem failed: [Failure instance: Traceback (failure with no frames): &lt;class 'twisted.internet.defer.CancelledError'&gt;:
     ]</pre>
     <p class="lwe-editable-pre">As you can see, the deferred is canceled and the asynchronous operation has truly been aborted (i.e., we don’t see the <code class="lwe-editable-pre">print</code> output from <code class="lwe-editable-pre">send_poem</code>).</p>
+
+詩のプロキシ 3.0
+================
+..
     <h3 class="lwe-editable-pre">Poetry Proxy 3.0</h3>
+
+..
     <p class="lwe-editable-pre">As we discussed in the Introduction, the poetry proxy server is a good candidate for implementing cancellation, as it allows us to abort the poem download if it turns out that nobody wants it (i.e., the client closes the connection before we send the poem). Version 3.0 of the proxy, located in <a href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-4/poetry-proxy.py#L1" class="lwe-editable-pre"><tt class="lwe-editable-pre">twisted-server-4/poetry-proxy.py</tt></a>, implements deferred cancellation. The first change is in the <a href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-4/poetry-proxy.py#L52" class="lwe-editable-pre"><code class="lwe-editable-pre">PoetryProxyProtocol</code></a>:</p>
     <pre class="lwe-editable-pre">class PoetryProxyProtocol(Protocol):
 
@@ -257,7 +281,13 @@
     <pre class="lwe-editable-pre">Fetching poem from server.
     Canceling poem download.</pre>
     <p class="lwe-editable-pre">And you should see the slow server has stopped printing output for each bit of poem it sends, since our proxy hung up. You can start and stop the client multiple times to verify each download is canceled each time. But if you let the poem run to completion, then the proxy caches the poem and sends it immediately after that.</p>
+
+驚くべきことをもうひとつ
+========================
+..
     <h3 class="lwe-editable-pre">One More Wrinkle</h3>
+
+..
     <p class="lwe-editable-pre">We said several times above that canceling an already-fired deferred has no effect. Well, that’s not quite true. In <a href="http://krondo.com/blog/?p=2159" class="lwe-editable-pre">Part 13</a> we learned that the callbacks and errbacks attached to a deferred may return deferreds themselves. And in that case, the original (outer) deferred pauses the execution of its callback chains and waits for the inner deferred to fire (see <a href="http://krondo.com/blog/?p=2159#figure28" class="lwe-editable-pre">Figure 28</a>).</p>
     <p class="lwe-editable-pre">Thus, even though a deferred has fired the higher-level code that made the asynchronous request may not have received the result yet, because the callback chain is paused waiting for an inner deferred to finish. So what happens if the higher-level code cancels that outer deferred? In that case the outer deferred does not cancel itself (it has already fired after all); instead, the outer deferred cancels the inner deferred.</p>
     <p class="lwe-editable-pre">So when you cancel a deferred, you might not be canceling the main asynchronous operation, but rather some other asynchronous operation triggered as a result of the first. Whew!</p>
@@ -304,13 +334,31 @@
     done</pre>
     <p class="lwe-editable-pre">As you can see, canceling the outer deferred does not cause the outer cancel callback to fire. Instead, it cancels the inner deferred so the inner cancel callback fires, and then outer errback receives the <code class="lwe-editable-pre">CancelledError</code> (from the inner deferred).</p>
     <p class="lwe-editable-pre">You may wish to stare at that code a while, and try out variations to see how they affect the outcome.</p>
+
+議論
+====
+..
     <h3 class="lwe-editable-pre">Discussion</h3>
+
+..
     <p class="lwe-editable-pre">Canceling a deferred can be a very useful operation, allowing our programs to avoid work they no longer need to do. And as we have seen, it can be a little bit tricky, too.</p>
     <p class="lwe-editable-pre">One very important fact to keep in mind is that canceling a deferred doesn’t necessarily cancel the underlying asynchronous operation. In fact, as of this writing, most deferreds won’t really “cancel”, since most Twisted code was written prior to Twisted 10.1.0 and hasn’t been updated. This includes many of the APIs in Twisted itself! Check the documentation and/or the source code to find out whether canceling the deferred will truly cancel the request, or simply ignore it.</p>
     <p class="lwe-editable-pre">And the second important fact is that simply returning a deferred from your asynchronous APIs will not necessarily make them cancelable in the complete sense of the word. If you want to implement canceling in your own programs, you should study the Twisted source code to find more examples. Cancellation is a brand new feature so the patterns and best practices are still being worked out.</p>
+
+次は
+====
+..
     <h3 class="lwe-editable-pre">Looking Ahead</h3>
+
+..
     <p class="lwe-editable-pre">At this point we’ve learned just about everything about Deferreds and the core concepts behind Twisted. Which means there’s not much more to introduce, as the rest of Twisted consists mainly of specific applications, like web programming or asynchronous database access. So in the <a href="http://krondo.com/blog/?p=2692" class="lwe-editable-pre">next</a> couple of Parts we’re going to take a little detour and look at two other systems that use asynchronous I/O to see how some of their ideas relate to the ideas in Twisted. Then, in the final Part, we will wrap up and suggest ways to continue your Twisted education.</p>
+
+おすすめの練習問題
+------------------
+..
     <h3 class="lwe-editable-pre">Suggested Exercises</h3>
+
+..
     <ol class="">
     <li class="lwe-editable-pre">Did you know you can spell canceled with one or two els? <a href="http://mw4.m-w.com/dictionary/canceled" class="lwe-editable-pre">It’s true</a>. It all depends on what sort of mood you’re in.</li>
     <li class="lwe-editable-pre">Peruse the source code of the <a href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#L167" class="lwe-editable-pre"><code class="lwe-editable-pre">Deferred</code></a> class, paying special attention to the implementation of cancellation.</li>

@@ -1,14 +1,25 @@
 ========================
 パート15: テストされた詩
 ========================
-
 ..
     <H2>Part 15: Tested Poetry</H2>
+
+はじめに
+========
+..
     <H3>Introduction</H3>
+
+..
     <P>We’ve written a lot of code in our exploration of Twisted, but so far we’ve neglected to write something important — tests. And you may be wondering how you can test asynchronous code using a synchronous framework like the <A href="http://docs.python.org/library/unittest.html#module-unittest"><CODE>unittest</CODE></A> package that comes with Python. The short answer is you can’t. As we’ve discovered, synchronous and asynchronous code do not mix, at least not readily.</P>
     <P>Fortunately, Twisted includes its own testing framework called <A href="http://twistedmatrix.com/documents/current/core/howto/testing.html"><CODE>trial</CODE></A> that does support testing asynchronous code (and you can use it to test synchronous code, too).</P>
     <P>We’ll assume you are already familiar with the basic mechanics of <A href="http://docs.python.org/library/unittest.html#module-unittest"><CODE>unittest</CODE></A> and similar testing frameworks, in which you create tests by defining a class with a specific parent class (usually called something like <CODE>TestCase</CODE>), and each method of that class starting with the word “<CODE>test</CODE>” is considered a single test. The framework takes care of discovering all the tests, running them one after the other with optional&nbsp;<CODE>setUp</CODE> and <CODE>tearDown</CODE> steps, and then reporting the results.</P>
+
+例
+==
+..
     <H3>The Example</H3>
+
+..
     <P>You will find some example tests located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L1"><TT>tests/test_poetry.py</TT></A>. To ensure all our examples are self-contained (so you don’t need to worry about <TT>PYTHONPATH</TT> settings), we have copied all the necessary code into the test module. Normally, of course, you would just import the modules you wanted to test.</P>
     <P>The example is testing both the poetry client and server, by using the client to fetch a poem from a test server. To provide a poetry server for testing, we implement the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L70"><CODE>setUp</CODE></A> method in our test case:</P>
     <PRE>class PoetryTestCase(TestCase):
@@ -45,7 +56,13 @@
     <P>You can run the tests yourself using the <TT>trial</TT> script like this:</P>
     <PRE>trial tests/test_poetry.py</PRE>
     <P>And you should see some output showing each test case and an <TT>OK</TT> telling you each test passed.</P>
+
+議論
+====
+..
     <H3>Discussion</H3>
+
+..
     <P>Because <CODE>trial</CODE> is so similar to <CODE>unittest</CODE> when it comes to the basic API, it’s pretty easy to get started writing tests. Just return a deferred if your test uses asynchronous code, and <CODE>trial</CODE> will take care of the rest. You can also return a deferred from the <CODE>setUp</CODE> and <CODE>tearDown</CODE> methods, if those need to be asynchronous as well.</P>
     <P>Any log messages from your tests will be collected in a file inside a directory called <TT>_trial_temp</TT> that <TT>trial</TT> will create automatically if it doesn’t exist. In addition to the errors printed to the screen, the log is a useful starting point when debugging failing tests.</P>
     <P>Figure 33 shows a hypothetical test run in progress:<BR>
@@ -57,10 +74,22 @@
     <LI>return a deferred.</LI>
     </OL>
     <P>But that means that whatever calls that function must be willing to accept a deferred, and also not block (and thus likely return a deferred as well). And so it goes up and up. Thus, the need for a framework like <TT>trial</TT> which can handle asynchronous tests that return deferreds.</P>
+
+まとめ
+======
+..
     <H3>Summary</H3>
+
+..
     <P>That’s it for our look at unit testing. If would like to see more examples of how to write unit tests for Twisted code, you need look no further than Twisted itself. The Twisted framework comes with a very large suite of unit tests, with new ones added in each release. Since these tests are scrutinized by Twisted experts during code reviews before being accepted into the codebase, they make excellent examples of how to test Twisted code the right way.</P>
     <P>In <A href="http://krondo.com/blog/?p=2345">Part 16</A> we will use a Twisted utility to turn our poetry server into a genuine daemon.</P>
+
+おすすめの練習問題
+==================
+..
     <H3>Suggested Exercises</H3>
+
+..
     <OL>
     <LI>Change one of the tests to make it fail and run <CODE>trial</CODE> again to see the output.</LI>
     <LI>Read the online <A href="http://twistedmatrix.com/documents/current/core/howto/testing.html">trial documentation</A>.</LI>

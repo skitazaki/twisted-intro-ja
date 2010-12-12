@@ -3,10 +3,22 @@
 ============================
 ..
     <h2 class="lwe-editable-pre">Part 21: Lazy is as Lazy Doesn’t: Twisted and Haskell</h2>
+
+はじめに
+========
+..
     <h3 class="lwe-editable-pre">Introduction</h3>
+
+..
     <p class="lwe-editable-pre">In the last Part we compared Twisted with <a href="http://erlang.org/" class="lwe-editable-pre">Erlang</a>, giving most of our attention to some ideas they have in common. And that ended up being pretty simple, as asynchronous I/O and reactive programming are key components of the Erlang runtime and process model.</p>
     <p class="lwe-editable-pre">Today we are going to range further afield and look at <a href="http://haskell.org/" class="lwe-editable-pre">Haskell</a>, another functional language that is nevertheless quite different from Erlang (and, of course, Python). There won’t be as many parallels, but we will nevertheless find some asynchronous I/O hiding under the covers.</p>
+
+大文字 F の付いた関数
+=====================
+..
     <h3 class="lwe-editable-pre">Functional with a Capital F</h3>
+
+..
     <p class="lwe-editable-pre">Although Erlang is also a functional language, its main focus is a reliable concurrency model. Haskell, on the other hand, is functional through and through, making unabashed use of concepts from <a href="http://en.wikipedia.org/wiki/Category_theory" class="lwe-editable-pre">category theory</a> like <a href="http://en.wikipedia.org/wiki/Functor" class="lwe-editable-pre">functors</a> and <a href="http://en.wikipedia.org/wiki/Monad_%28category_theory%29" class="lwe-editable-pre">monads</a>.</p>
     <p class="lwe-editable-pre">Don’t worry, we’re not going into any of that here (as if we could). Instead we’ll focus on one of Haskell’s more traditionally functional features: laziness. Like many functional languages (but unlike Erlang), Haskell supports <a href="http://en.wikipedia.org/wiki/Lazy_evaluation" class="lwe-editable-pre">lazy evaluation</a>. In a lazily evaluated language the text of a program doesn’t so much describe how to compute something as what to compute. The details of actually performing the computation are generally left to the compiler and runtime system.</p>
     <p class="lwe-editable-pre">And, more to the point, as a lazily-evaluated computation proceeds the runtime may evaluate expressions only partially (lazily) instead of all at once. In general, the runtime will evaluate only as much of an expression as is needed to make progress on the current computation.</p>
@@ -51,7 +63,13 @@
     <p class="lwe-editable-pre">Although we’ve drawn the Haskell runtime as a simple loop, it might be implemented with multiple threads (and probably is if you are using the GHC version of Haskell). But the main point to notice is how this figure looks like a reactor loop consuming bits of data as they come in on network sockets.</p>
     <p class="lwe-editable-pre">You can think of asynchronous I/O and the reactor pattern as a very limited form of lazy evaluation. The asynchronous I/O motto is: “Only process as much data as you have”. And the lazy evaluation motto is: “Only process as much data as you need”. Furthermore, a lazily-evaluated language applies that motto almost everywhere, not just in the limited scope of I/O.</p>
     <p class="lwe-editable-pre">But the point is that, for a lazily-evaluated language, making use of asynchronous I/O is no big deal. The compiler and runtime are already designed to process data structures bit by bit, so lazily processing the incoming chunks of an I/O stream is just par for the course. And thus the Haskell runtime, like the Erlang runtime, simply incorporates asynchronous I/O as part of its socket abstractions. And we can show that by implementing a poetry client in Haskell.</p>
+
+Haskell での詩
+==============
+..
     <h3 class="lwe-editable-pre">Haskell Poetry</h3>
+
+..
     <p class="lwe-editable-pre">Our first Haskell poetry client is located in <a href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs" class="lwe-editable-pre"><tt class="lwe-editable-pre">haskell-client-1/get-poetry.hs</tt></a>. As with Erlang, we’re going to jump straight to a finished client, and then suggest further reading if you’d like to learn more.</p>
     <p class="lwe-editable-pre">Haskell also supports light-weight threads or processes, though they aren’t as central to Haskell as they are to Erlang, and our Haskell client creates one process for each poem we want to download. The key function there is <a href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L64" class="lwe-editable-pre"><code class="lwe-editable-pre">runTask</code></a> which connects to a socket and starts the <a href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L48" class="lwe-editable-pre"><code class="lwe-editable-pre">getPoetry</code></a> function in a light-weight thread.</p>
     <p class="lwe-editable-pre">You’ll notice a lot of type declarations in this code. Haskell, unlike Python or Erlang, is statically typed. We don’t declare types for each and every variable because Haskell will automatically infer types not explicitly declared (or report an error if it can’t). A number of the functions include the <code class="lwe-editable-pre">IO</code> type (technically a monad) because Haskell requires us to cleanly separate code with side-effects (i.e., code that performs I/O) from pure functions.</p>
@@ -91,14 +109,26 @@
     <p class="lwe-editable-pre">And you should see the text of each poem appear, eventually, on the screen.</p>
     <p class="lwe-editable-pre">You will notice from the server output that each server is sending data to the client simultaneously. What’s more, the client prints out each line of the first poem as soon as possible, without waiting for the rest of the poem, even while it’s working on the other two. And then it quickly prints out the second poem, which it has been accumulating all along.</p>
     <p class="lwe-editable-pre">And all of that happens without us having to do much of anything. There are no callbacks, no messages being passed back and forth, just a concise description of what we want the program to do, and very little in the way of how it should go about doing it. The rest is taken care of by the Haskell compiler and runtime. Nifty.</p>
+
+議論、さらに読むべきもの
+========================
+..
     <h3 class="lwe-editable-pre">Discussion and Further Reading</h3>
+
+..
     <p class="lwe-editable-pre">In moving from Twisted to Erlang to Haskell we can see a parallel movement, from the foreground to the background, of the ideas behind asynchronous programming. In Twisted, asynchronous programming is the central motivating idea behind Twisted’s existence. And Twisted’s implementation as a framework separate from Python (and Python’s lack of core asynchronous abstractions like lightweight threads) keeps the asynchronous model front and center when you write programs using Twisted.</p>
     <p class="lwe-editable-pre">In Erlang, asynchronicity is still very visible to the programmer, but the details are now part of the fabric of the language and runtime system, enabling an abstraction in which asynchronous messages are exchanged between synchronous processes.</p>
     <p class="lwe-editable-pre">And finally, in Haskell, asynchronous I/O is just another technique inside the runtime, largely unseen by the programmer, for providing the lazy evaluation that is one of Haskell’s central ideas.</p>
     <p class="lwe-editable-pre">We don’t have any profound insight into this situation, we’re just pointing out the many and interesting places where the asynchronous model shows up, and the many different ways it can be expressed.</p>
     <p class="lwe-editable-pre">And if any of this has piqued your interest in Haskell, then we can recommend <a href="http://www.amazon.com/exec/obidos/ASIN/0596514980/krondonet-20" class="lwe-editable-pre">Real World Haskell</a> to continue your studies. The book is a model of what a good language introduction should be. And while I haven’t read it, I’ve heard good things about <a href="http://learnyouahaskell.com/" class="lwe-editable-pre">Learn You a Haskell</a>.</p>
     <p class="lwe-editable-pre">This brings us to the end of our tour of asynchronous systems outside of Twisted, and the penultimate part in our series. In <a href="http://krondo.com/blog/?p=2874" class="lwe-editable-pre">Part 22</a> we will conclude, and suggest ways to learn more about Twisted.</p>
+
+おすすめの練習問題
+------------------
+..
     <h3 class="lwe-editable-pre">Suggested Exercises for the Startlingly Motivated</h3>
+
+..
     <ol class="">
     <li class="lwe-editable-pre">Compare the Twisted, Erlang, and Haskell clients with each other.</li>
     <li class="lwe-editable-pre">Modify the Haskell clients to handle failures to connect to a poetry server so they download all the poetry they can and output reasonable error messages for the poems they can’t.</li>

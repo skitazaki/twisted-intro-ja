@@ -3,9 +3,21 @@
 ======================================
 ..
     <H2>Part 17: Just Another Way to Spell “Callback”</H2>
+
+はじめに
+========
+..
     <H3>Introduction</H3>
+
+..
     <P>In this Part we’re going to return to the subject of callbacks. We’ll introduce another technique for writing callbacks in Twisted that uses <A href="http://docs.python.org/tutorial/classes.html#generators">generators</A>. We’ll show how the technique works and contrast it with using “pure” Deferreds. Finally we’ll rewrite one of our poetry clients using this technique. But first let’s review how generators work so we can see why they are a candidate for creating callbacks.</P>
+
+ジェネレータに関する簡単な復習
+------------------------------
+..
     <H4>A Brief Review of Generators</H4>
+
+..
     <P>As you probably know, a Python generator is a “restartable function” that you create by using the <CODE>yield</CODE> expression in the body of your function. By doing so, the function becomes a “generator function” that returns an <A href="http://docs.python.org/tutorial/classes.html#iterators">iterator</A> you can use to run the function in a series of steps. Each cycle of the iterator restarts the function, which proceeds to execute until it reaches the next <CODE>yield</CODE>.</P>
     <P>Generators (and iterators) are often used to represent lazily-created sequences of values. Take a look at the example code in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/gen-1.py#L1"><TT>inline-callbacks/gen-1.py</TT></A>:</P>
     <PRE>def my_generator():
@@ -84,13 +96,25 @@
     except StopIteration:
         pass</PRE>
     <P>In Python 2.5 and later versions, the <CODE>yield</CODE> statement is an expression that evaluates to a value. And the code that restarts the generator can determine that value using the <CODE>send</CODE> method instead of <CODE>next</CODE> (if you use <CODE>next</CODE> the value is <CODE>None</CODE>). What’s more, you can actually raise an arbitrary exception <EM>inside</EM> the generator using the <CODE>throw</CODE> method. How cool is that?</P>
+
+インラインコールバック
+======================
+..
     <H3>Inline Callbacks</H3>
+
+..
     <P>Given what we just reviewed about <CODE>send</CODE>ing and <CODE>throw</CODE>ing values and exceptions into a generator, we can envision a generator as a series of callbacks, like the ones in a deferred, which receive either results or failures. The callbacks are separated by <CODE>yield</CODE>s and the value of each <CODE>yield</CODE> expression is the result for the next callback (or the <CODE>yield</CODE> raises an exception and that’s the failure). Figure 35 shows the correspondence:</P>
     <DIV id="attachment_2461" class="wp-caption aligncenter" style="width: 438px"><A href="./part17_files/generator-callbacks1.png"><IMG class="size-full wp-image-2461" title="Figure 35: generator as a callback sequence" src="./part17_files/generator-callbacks1.png" alt="Figure 35: generator as a callback sequence" width="428" height="235"></A><P class="wp-caption-text">Figure 35: generator as a callback sequence</P></DIV>
     <P>Now when a series of callbacks is chained together in a deferred, each callback receives the result from the one prior. That’s easy enough to do with a generator — just <CODE>send</CODE> the value you got from the previous run of the generator (the value it <CODE>yield</CODE>ed) the next time you restart it. But that also seems a bit silly. Since the generator computed the value to begin with, why bother sending it back? The generator could just save the value in a variable for the next time it’s needed. So what’s the point?</P>
     <P>Recall the fact we learned in <A href="http://krondo.com/blog/?p=2159">Part 13</A>, that the callbacks in a deferred can return deferreds themselves. And when that happens, the outer deferred is paused until the inner deferred fires, and then the next callback (or errback) in the outer deferred’s chain is called with the result (or failure) from the inner deferred.</P>
     <P>So imagine that our generator <CODE>yield</CODE>s a deferred object instead of an ordinary Python value. The generator is now “paused”, and that’s automatic; generators always pause after every <CODE>yield</CODE> statement until they are explicitly restarted. So we can delay restarting the generator until the deferred fires, at which point we either <CODE>send</CODE> the value (if the deferred succeeds) or <CODE>throw</CODE> the exception (if the deferred fails). That would make our generator a genuine sequence of asynchronous callbacks and that’s the idea behind the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#L973"><CODE>inlineCallbacks</CODE></A> function in <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py"><CODE>twisted.internet.defer</CODE></A>.</P>
+
+inlineCalbacks
+--------------
+..
     <H4>inlineCallbacks</H4>
+
+..
     <P>Consider the example program in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/inline-callbacks-1.py#L1"><TT>inline-callbacks/inline-callbacks-1.py</TT></A>:</P>
     <PRE>from twisted.internet.defer import inlineCallbacks, Deferred
 
@@ -130,7 +154,13 @@
     <P>In the example we are just using <CODE>callLater</CODE> to fire the deferreds after a short period of time. While that’s a handy way to put in a non-blocking delay into our callback chain, normally we would be <CODE>yield</CODE>ing a deferred returned by some other asynchronous operation (i.e., <CODE>get_poetry</CODE>) invoked from our generator.</P>
     <P>Ok, now we know how an <CODE>inlineCallbacks</CODE>-decorated function runs, but what return value do you get if you actually call one? As you might have guessed, you get a deferred. Since we can’t know exactly when that generator will stop running (it might <CODE>yield</CODE> one or more deferreds), the decorated function itself is asynchronous and a deferred is the appropriate return value. Note the deferred that is returned isn’t one of the deferreds the generator may <CODE>yield</CODE>. Rather, it’s a deferred that fires only after the generator has completely finished (or throws an exception).</P>
     <P>If the generator throws an exception, the returned deferred will fire its errback chain with that exception wrapped in a <CODE>Failure</CODE>. But if we want the generator to return a normal value, we must “return” it using the <CODE>defer.returnValue</CODE> function. Like the ordinary <CODE>return</CODE> statement, it will also stop the generator (it actually raises a special exception). The <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/inline-callbacks-2.py#L1"><TT>inline-callbacks/inline-callbacks-2.py</TT></A> example illustrates both possibilities.</P>
+
+クライアント 7.0
+================
+..
     <H3>Client 7.0</H3>
+
+..
     <P>Let’s put <CODE>inlineCallbacks</CODE> to work with a new version of our poetry client. You can see the code in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L1"><TT>twisted-client-7/get-poetry.py</TT></A>. You may wish to compare it to client 6.0 in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L151"><TT>twisted-client-6/get-poetry.py</TT></A>. The relevant changes are in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L151"><CODE>poetry_main</CODE></A>:</P>
     <PRE>def poetry_main():
         addresses = parse_args()
@@ -182,7 +212,13 @@
     <P>Now you can run the new client:</P>
     <PRE>python twisted-client-7/get-poetry.py 10001 10002 10003</PRE>
     <P>Try turning off one or more of the servers to see how the client handles errors.</P>
+
+議論
+====
+..
     <H3>Discussion</H3>
+
+..
     <P>Like the <CODE>Deferred</CODE> object, the <CODE>inlineCallbacks</CODE> function gives us a new way of organizing our asynchronous callbacks. And, as with deferreds, <CODE>inlineCallbacks</CODE> doesn’t change the rules of the game. Specifically, our callbacks still run one at a time, and they are still invoked by the reactor. We can confirm that fact in our usual way by printing out a traceback from an inline callback, as in the example script <A href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/inline-callbacks-tb.py#L1"><TT>inline-callbacks/inline-callbacks-tb.py</TT></A>. Run that code and you will get a traceback with <CODE>reactor.run()</CODE> at the top, lots of helper functions in between, and our callback at the bottom.</P>
     <P>We can adapt Figure 29, which explains what happens when one callback in a deferred returns another deferred, to show what happens when an <CODE>inlineCallbacks</CODE> generator <CODE>yield</CODE>s a deferred. See Figure 36:</P>
     <DIV id="attachment_2533" class="wp-caption alignnone" style="width: 639px"><A href="./part17_files/inline-callbacks1.png"><IMG class="size-full wp-image-2533" title="Figure 36: flow control in an inlineCallbacks function" src="./part17_files/inline-callbacks1.png" alt="Figure 36: flow control in an inlineCallbacks function" width="629" height="582"></A><P class="wp-caption-text">Figure 36: flow control in an inlineCallbacks function</P></DIV>
@@ -200,10 +236,22 @@
     <LI>The compact form of a generator can obscure the fact that an asynchronous callback is even involved. Despite its visually similar appearance to an ordinary sequential function, a generator behaves in a very different manner. The <CODE>inlineCallbacks</CODE> function is not a way to avoid learning the asynchronous programming model.</LI>
     </UL>
     <P>As with any technique, practice will provide the experience necessary to make an informed choice.</P>
+
+まとめ
+======
+..
     <H3>Summary</H3>
+
+..
     <P>In this Part we learned about the <CODE>inlineCallbacks</CODE> decorator and how it allows us to express a sequence of asynchronous callbacks in the form of a Python generator.</P>
     <P>In <A href="http://krondo.com/blog/?p=2571">Part 18</A> we will learn a technique for managing a set of “parallel” asynchronous operations.</P>
+
+おすすめの練習問題
+------------------
+..
     <H3>Suggested Exercises</H3>
+
+..
     <OL>
     <LI>Why is the <CODE>inlineCallbacks</CODE> function plural?</LI>
     <LI>Study the implementation of <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#973"><CODE>inlineCallbacks</CODE></A> and its helper function <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#L874"><CODE>_inlineCallbacks</CODE></A>. Ponder the phrase “the devil is in the details”.</LI>

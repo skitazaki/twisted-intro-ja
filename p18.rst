@@ -3,12 +3,24 @@
 ============================
 ..
     <H2>Part 18: Deferreds En Masse</H2>
+
+はじめに
+========
+..
     <H3>Introduction</H3>
+
+..
     <P>In the last Part we learned a new way of structuring sequential asynchronous callbacks using a generator. Thus, including deferreds, we now have two techniques for chaining asynchronous operations together.</P>
     <P>Sometimes, though, we want to run a group of asynchronous operations in “parallel”. Since Twisted is single-threaded they won’t really run concurrently, but the point is we want to use asynchronous I/O to work on a group of tasks as fast as possible. Our poetry clients, for example, download poems from multiple servers at the same time, rather than one server after another. That was the whole point of using Twisted for getting poetry, after all.</P>
     <P>And, as a result, all our poetry clients have had to solve this problem: how do you know when all the asynchronous operations you have started are done? So far we have solved this by collecting our results into a list (like the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L160"><CODE>results</CODE></A> list in client 7.0) and checking the length of the list. We have to be careful to collect failures as well as successful results, otherwise a single failure will cause the program to run forever, thinking there’s still work left to do.</P>
     <P>As you might expect, Twisted includes an abstraction you can use to solve this problem and we’re going to take a look at it today.</P>
+
+DeferredList
+============
+..
     <H3>The DeferredList</H3>
+
+..
     <P>The <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#593"><CODE>DeferredList</CODE></A> class allows us to treat a list of deferred objects as a single deferred. That way we can start a bunch of asynchronous operations and get notified only when all of them have finished (regardless of whether they succeeded or failed). Let’s look at some examples.</P>
     <P>In <A href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-1.py#L1"><TT>deferred-list/deferred-list-1.py</TT></A> you will find this code:</P>
     <PRE>from twisted.internet import defer
@@ -137,7 +149,13 @@
     <P>If you recall, the "Unhandled error in Deferred" message is generated when a deferred is garbage collected and the last callback in that deferred failed. The message is telling us we haven't caught all the potential asynchronous failures in our program. So where is it coming from in our example? It's clearly not coming from the <CODE>DeferredList</CODE>, since that succeeds. So it must be coming from <CODE>d2</CODE>.</P>
     <P>A <CODE>DeferredList</CODE> needs to know when each deferred it is monitoring fires. And the <CODE>DeferredList</CODE> does that in the usual way — by adding a callback and errback to each deferred. And by default, the callback (and errback) return the original result (or failure) after putting it in the final list. And since returning the original failure from the errback triggers the next errback, <CODE>d2</CODE> remains in the failed state after it fires.</P>
     <P>But if we pass <CODE>consumeErrors=True</CODE> to the <CODE>DeferredList</CODE>, the errback added by the <CODE>DeferredList</CODE> to each deferred will instead return <CODE>None</CODE>, thus "consuming" the error and eliminating the warning message. We could also handle the error by adding our own errback to <CODE>d2</CODE>, as in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-7.py#L1"><TT>deferred-list/deferred-list-7.py</TT></A>.</P>
+
+クライアント 8.0
+================
+..
     <H3>Client 8.0</H3>
+
+..
     <P>Version 8.0 of our Get Poetry Now! client uses a <CODE>DeferredList</CODE> to find out when all the poetry has finished (or failed). You can find the new client in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L1"><TT>twisted-client-8/get-poetry.py</TT></A>. Once again the only change is in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L151"><CODE>poetry_main</CODE></A>. Let's look at the important changes:</P>
     <PRE>    ...
         ds = []
@@ -151,12 +169,24 @@
         dlist.addCallback(lambda res : reactor.stop())</PRE>
     <P>You may wish to compare it to the same section of <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L180"><CODE>client 7.0</CODE></A>.</P>
     <P>In client 8.0, we don't need the <CODE>poem_done</CODE> callback or the <CODE>results</CODE> list. Instead, we put each deferred we get back from <CODE>get_transformed_poem</CODE> into a list (<CODE>ds</CODE>) and then create a <CODE>DeferredList</CODE>. Since the <CODE>DeferredList</CODE> won't fire until all the poems have finished or failed, we just add a callback to the <CODE>DeferredList</CODE> to shutdown the reactor. In this case, we aren't using the result from the <CODE>DeferredList</CODE>, we just need to know when everything is finished. And that's it!</P>
+
+議論
+====
+..
     <H3>Discussion</H3>
+
+..
     <P>We can visualize how a <CODE>DeferredList</CODE> works in Figure 37:<BR>
     </P><DIV id="attachment_2590" class="wp-caption alignnone" style="width: 615px"><A href="./part18_files/deferred-list.png"><IMG src="./part18_files/deferred-list.png" alt="Figure 37: the result of a DeferredList" title="Figure 37: the result of a DeferredList" width="605" height="340" class="size-full wp-image-2590"></A><P class="wp-caption-text">Figure 37: the result of a DeferredList</P></DIV><P></P>
     <P>Pretty simple, really. There are a couple options to <CODE>DeferredList</CODE> we haven't covered, and which change the behavior from what we have described above. We will leave them for you to explore in the Exercises below.</P>
     <P>In the next Part we will cover one more feature of the <CODE>Deferred</CODE> class, a feature recently introduced in Twisted 10.1.0.</P>
+
+おすすめの練習問題
+------------------
+..
     <H3>Suggested Exercises</H3>
+
+..
     <OL>
     <LI>Read the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#5933">source code</A> for the <CODE>DeferredList</CODE>.</LI>
     <LI>Modify the examples in <TT>deferred-list</TT> to experiment with the optional constructor arguments <CODE>fireOnOneCallback</CODE> and <CODE>fireOnOneErrback</CODE>. Come up with scenarios where you would use one or the other (or both).</LI>
