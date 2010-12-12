@@ -3,45 +3,156 @@
 ===============================
 .. Part 14: When a Deferred Isn’t
 
+はじめに
+========
 ..
     <H3>Introduction</H3>
+
+このパートでは ``Deferred`` クラスの違う一面を学んでいきましょう。
+議論を盛り上げるため、詩に関連したサービスにサーバをもうひとつ追加します。
+外部の同じサーバから詩を取得したがっている内部的なクライアントがたくさんあると仮定してください。
+しかし、この外部のサーバは遅く、インターネット越しの膨大な要求によってすでに過負荷になっています。
+クライアントをさらに増やして可愛そうなサーバの問題を増長させたくはありません。
+
+..
     <P>In this part we’re going to learn another aspect of the <CODE>Deferred</CODE> class. To motivate the discussion, we’ll add one more server to our stable of poetry-related services. Suppose we have a large number of internal clients who want to get poetry from the same external server. But this external server is slow and already over-burdened by the insatiable demand for poetry across the Internet. We don’t want to contribute to that poor server’s problems by sending all our clients there too.</P>
+
+その代わりにキャッシュプロキシサーバを作ってみましょう。
+クライアントがプロキシに接続すると、プロキシは外部のサーバから詩を取得するか以前に取得したキャッシュコピーを返します。
+すべてのクライアントをプロキシに向けると外部サーバへの負荷を抑えられます。
+図30にこの設定を示します。
+
+..
     <P>So instead we’ll make a caching proxy server. When a client connects to the proxy, the proxy will either fetch the poem from the external server or return a cached copy of a previously retrieved poem. Then we can point all our clients at the proxy and our contribution to the external server’s load will be negligible. We illustrate this setup in Figure 30:</P>
-    <DIV id="attachment_2216" class="wp-caption aligncenter" style="width: 676px"><A href="./part14_files/proxy1.png"><IMG class="size-full wp-image-2216" title="Figure 30: a caching proxy server" src="./part14_files/proxy1.png" alt="Figure 30: a caching proxy server" width="666" height="434"></A><P class="wp-caption-text">Figure 30: a caching proxy server</P></DIV>
-    <P>Consider what happens when a client connects to the proxy to get a poem. If the proxy’s cache is empty, the proxy must wait (asynchronously) for the external server to respond before sending a poem back. So far so good, we already know how to handle that situation with an asynchronous function that returns a deferred. On the other hand, if there’s already a poem in the cache, the proxy can send it back immediately, no need to wait at all.&nbsp; So the proxy’s internal mechanism for getting a poem will sometimes be asynchronous and sometimes synchronous.</P>
-    <P>So what do we do if we have a function that is only asynchronous some of the time? Twisted provides a couple of options, and they both depend on a feature of the <CODE>Deferred</CODE> class we haven’t used yet: you can fire a deferred <EM>before</EM> you return it to the caller.</P>
-    <P>This works because, although you cannot fire a deferred twice, you can add callbacks and errbacks to a deferred after it has fired. And when you do so, the deferred simply continues firing the chain from where it last left off. One important thing to note is an already-fired deferred may fire the new callback (or errback, depending on the state of the deferred) immediately, i.e., right when you add it.</P>
-    <P>Consider Figure 31, showing a deferred that has been fired:</P>
-    <DIV id="attachment_2268" class="wp-caption aligncenter" style="width: 281px"><A href="./part14_files/deferred-13.png"><IMG src="./part14_files/deferred-13.png" alt="Figure 31: a deferred that has been fired" title="Figure 31: a deferred that has been fired" width="271" height="281" class="size-full wp-image-2268"></A><P class="wp-caption-text">Figure 31: a deferred that has been fired</P></DIV>
-    <P>If we were to add another callback/errback pair at this point, then the deferred would immediately fire the new callback, as in Figure 32:</P>
-    <DIV id="attachment_2269" class="wp-caption aligncenter" style="width: 281px"><A href="./part14_files/deferred-14.png"><IMG src="./part14_files/deferred-14.png" alt="Figure 32: the same deferred with a new callback" title="Figure 32: the same deferred with a new callback" width="271" height="357" class="size-full wp-image-2269"></A><P class="wp-caption-text">Figure 32: the same deferred with a new callback</P></DIV>
-    <P>The callback (not the errback) is fired because the previous callback succeeded. If it had failed (raised an Exception or returned a Failure) then the new errback would have been called instead.</P>
-    <P>We can test out this new feature with the example code in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-11.py#L1"><TT>twisted-deferred/defer-11.py</TT></A>. Read and run that script to see how a deferred behaves when you fire it and then add callbacks. Note how in the first example each new callback is invoked immediately (you can tell from the order of the <TT>print</TT> output).</P>
-    <P>The second example in that script shows how we can <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L272"><CODE>pause()</CODE></A> a deferred so it doesn’t fire the callbacks right away. When we are ready for the callbacks to fire, we call <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L278"><CODE>unpause()</CODE></A>. That’s actually the same mechanism the deferred uses to pause itself when one of its callbacks returns another deferred. Nifty!</P>
 
 .. _figure30:
 
-.. figure:: images/p14_deferred-13.png
+.. figure:: images/p14_proxy1.png
 
     図３０：キャッシュするプロキシサーバ
 
+..
+    <DIV id="attachment_2216" class="wp-caption aligncenter" style="width: 676px"><A href="./part14_files/proxy1.png"><IMG class="size-full wp-image-2216" title="Figure 30: a caching proxy server" src="./part14_files/proxy1.png" alt="Figure 30: a caching proxy server" width="666" height="434"></A><P class="wp-caption-text">Figure 30: a caching proxy server</P></DIV>
+
+クライアントが詩を取得するためにプロキシに接続すると何が起こるかを考えてみてください。
+キャッシュが空の場合にはプロキシは (非同期に) 外部サーバからの応答を待たなくてはなりません。詩を送り返すのはその後です。
+幸いにして、私たちは遅延オブジェクトを返す非同期関数を使ってこの状況を処理する方法を知っています。
+とはいえ、キャッシュに詩がすでに存在していると、プロキシは即座にそれを送り返せます。待つ必要がありません。
+このため、プロキシが詩を取得する内部機構は時として非同期であり、同期にもなりえるのです。
+
+..
+    <P>Consider what happens when a client connects to the proxy to get a poem. If the proxy’s cache is empty, the proxy must wait (asynchronously) for the external server to respond before sending a poem back. So far so good, we already know how to handle that situation with an asynchronous function that returns a deferred. On the other hand, if there’s already a poem in the cache, the proxy can send it back immediately, no need to wait at all.&nbsp; So the proxy’s internal mechanism for getting a poem will sometimes be asynchronous and sometimes synchronous.</P>
+
+それでは、非同期でしかない関数しかなかったらどうすれば良いのでしょうか？
+Twisted はふたつのオプションを提供しており、どちらも ``Deferred`` クラスでこれまで使ってこなかった機能に依存しています。
+呼び出し側に戻す「前」に遅延オブジェクトを発火させてしまうことです。
+
+..
+    <P>So what do we do if we have a function that is only asynchronous some of the time? Twisted provides a couple of options, and they both depend on a feature of the <CODE>Deferred</CODE> class we haven’t used yet: you can fire a deferred <EM>before</EM> you return it to the caller.</P>
+
+遅延オブジェクトを二回は発火できませんが、発火された後でもコールバックとエラー用コールバックを追加できますので、これは機能します。
+こうすると、単純に遅延オブジェクトはコールバックチェーンを続けていきます。
+ひとつ大事なこととしては、発火済みの遅延オブジェクトは新しいコールバック (もしくはエラー用コールバックであり、遅延オブジェクトの状態に依ります) をすぐさま発火させるかもしれない、ということです。
+つまり、コールバックを追加した瞬間にです。
+
+..
+    <P>This works because, although you cannot fire a deferred twice, you can add callbacks and errbacks to a deferred after it has fired. And when you do so, the deferred simply continues firing the chain from where it last left off. One important thing to note is an already-fired deferred may fire the new callback (or errback, depending on the state of the deferred) immediately, i.e., right when you add it.</P>
+
+発火済みの遅延オブジェクトを表す図31について考えてみましょう。
+
+..
+    <P>Consider Figure 31, showing a deferred that has been fired:</P>
+
 .. _figure31:
 
-.. figure:: images/p14_deferred-14.png
+.. figure:: images/p14_deferred-13.png
 
-    図３１：発動された遅延オブジェクト
+    図３１：発火された遅延オブジェクト
 
+..
+    <DIV id="attachment_2268" class="wp-caption aligncenter" style="width: 281px"><A href="./part14_files/deferred-13.png"><IMG src="./part14_files/deferred-13.png" alt="Figure 31: a deferred that has been fired" title="Figure 31: a deferred that has been fired" width="271" height="281" class="size-full wp-image-2268"></A><P class="wp-caption-text">Figure 31: a deferred that has been fired</P></DIV>
+
+この時点でもうひとつのコールバックとエラー用コールバックのペアを付け足していたとすれば、遅延オブジェクトはすぐさまコールバックを発火させるでしょう。この様子を図32に示します。
+
+..
+    <P>If we were to add another callback/errback pair at this point, then the deferred would immediately fire the new callback, as in Figure 32:</P>
 
 .. _figure32:
 
-.. figure:: images/p14_proxy1.png
+.. figure:: images/p14_deferred-14.png
 
     図３２：新しいコールバックを持つ同じ遅延オブジェクト
 
 ..
+    <DIV id="attachment_2269" class="wp-caption aligncenter" style="width: 281px"><A href="./part14_files/deferred-14.png"><IMG src="./part14_files/deferred-14.png" alt="Figure 32: the same deferred with a new callback" title="Figure 32: the same deferred with a new callback" width="271" height="357" class="size-full wp-image-2269"></A><P class="wp-caption-text">Figure 32: the same deferred with a new callback</P></DIV>
+
+ひとつ前のコールバックは成功しますので、このコールバック (エラー用コールバックではありません) は発火されます。
+もしも失敗したら (Exception を送り出すか Failure を返した場合) 、新しいエラー用コールバックが呼び出されるでしょう。
+
+..
+    <P>The callback (not the errback) is fired because the previous callback succeeded. If it had failed (raised an Exception or returned a Failure) then the new errback would have been called instead.</P>
+
+`twisted-deferred/defer-11.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-11.py#L1>`_ にある例でこの新機能を確認できます。
+スクリプトを読んで実行してみてください。遅延オブジェクトを発火させてからコールバックを付け足したときに、それがどのように振舞うかを理解できるでしょう。
+最初の例では、新しいコールバックそれぞれが即座に呼び出されていた方法に注意しましょう。(``print`` が出力する順番で分かります)
+
+..
+    <P>We can test out this new feature with the example code in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-11.py#L1"><TT>twisted-deferred/defer-11.py</TT></A>. Read and run that script to see how a deferred behaves when you fire it and then add callbacks. Note how in the first example each new callback is invoked immediately (you can tell from the order of the <TT>print</TT> output).</P>
+
+スクリプトのふたつ目の例は、コールバックをすぐには発火しないことで、遅延オブジェクトを `pause() <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L272>`_ できる方法を教えてくれます。
+コールバックを発火する準備が整ったら `unpause() <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L278>`_ を呼び出します。
+これこそが Deferred のコールバックが自分ではない遅延オブジェクトを返したときに、自分自身を一時停止させる方法なのです。
+素晴らしいですね！
+
+..
+    <P>The second example in that script shows how we can <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L272"><CODE>pause()</CODE></A> a deferred so it doesn’t fire the callbacks right away. When we are ready for the callbacks to fire, we call <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L278"><CODE>unpause()</CODE></A>. That’s actually the same mechanism the deferred uses to pause itself when one of its callbacks returns another deferred. Nifty!</P>
+
+プロキシ 1.0
+============
+..
     <H3>Proxy 1.0</H3>
+
+それでは `twisted-server-1/poetry-proxy.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/poetry-proxy.py#L1>`_ にある詩のプロキシの最初のバージョンを見てみましょう。
+プロキシはクライアントとしてもサーバとしても動作しますので、プロトコルクラスとファクトリクラスのふたつのペアを持ちます。
+ひとつは詩を提供するためであり、もうひとつは外部サーバから詩を取得するためです。
+クライアントのペアのためのコードを見ておく必要はないでしょう。ひとつ前の詩のクライアントと一緒だからです。
+
+..
     <P>Now let’s look at the first version of the poetry proxy in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/poetry-proxy.py#L1"><TT>twisted-server-1/poetry-proxy.py</TT></A>. Since the proxy acts as both a client and a server, it has two pairs of Protocol/Factory classes, one for serving up poetry, and one for getting a poem from the external server. We won’t bother looking at the code for the client pair, it’s the same as in previous poetry clients.</P>
+
+とはいえサーバのペアを見る前に、 `ProxyService <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/poetry-proxy.py#L100>`_ に目を通しておきましょう。
+これは詩を取得するためのサーバ側のプロトコルです。
+
+..
     <P>But before we look at the server pair, we’ll look at the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/poetry-proxy.py#L100"><CODE>ProxyService</CODE></A>, which the server-side protocol uses to get a poem:</P>
+
+::
+
+    class ProxyService(object):
+
+        poem = None # the cached poem
+
+        def __init__(self, host, port):
+            self.host = host
+            self.port = port
+
+        def get_poem(self):
+            if self.poem is not None:
+                print 'Using cached poem.'
+                return self.poem
+
+            print 'Fetching poem from server.'
+            factory = PoetryClientFactory()
+            factory.deferred.addCallback(self.set_poem)
+            from twisted.internet import reactor
+            reactor.connectTCP(self.host, self.port, factory)
+            return factory.deferred
+
+        def set_poem(self, poem):
+            self.poem = poem
+            return poem
+
+..
     <PRE>class ProxyService(object):
 
         poem = None # the cached poem
@@ -65,8 +176,38 @@
         def set_poem(self, poem):
             self.poem = poem
             return poem</PRE>
+
+ここで大事なメソッドは ``get_poem`` です。
+すでにキャッシュに詩があれば、その詩を返すだけです。
+キャッシュになければ外部サーバへの接続を初期化し、詩が返されたら発火する遅延オブジェクトを返します。
+このため ``get_poem`` はたまにしか非同期でない関数といえます。
+
+..
     <P>The key method there is <CODE>get_poem</CODE>. If there’s already a poem in the cache, that method just returns the poem itself. On the other hand, if we haven’t got a poem yet, we initiate a connection to the external server and return a deferred that will fire when the poem comes back. So <CODE>get_poem</CODE> is a function that is only asynchronous some of the time.</P>
+
+このような関数をどうやって扱いましょうか？
+サーバサイドにある `protocol/factory <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/poetry-proxy.py#L52>`_ のペアを見てみましょう。
+
+..
     <P>How do you handle a function like that? Let’s look at the server-side <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/poetry-proxy.py#L52">protocol/factory</A> pair:</P>
+
+::
+
+    class PoetryProxyProtocol(Protocol):
+
+        def connectionMade(self):
+            d = maybeDeferred(self.factory.service.get_poem)
+            d.addCallback(self.transport.write)
+            d.addBoth(lambda r: self.transport.loseConnection())
+
+    class PoetryProxyFactory(ServerFactory):
+
+        protocol = PoetryProxyProtocol
+
+        def __init__(self, service):
+            self.service = service
+
+..
     <PRE>class PoetryProxyProtocol(Protocol):
 
         def connectionMade(self):
@@ -80,33 +221,120 @@
 
         def __init__(self, service):
             self.service = service</PRE>
+
+ファクトリはそのままですね。
+プロトコルインスタンスが ``get_poem`` メソッドを呼び出せるようにプロキシサービスの参照を保存しておくだけです。
+プロトコルが肝心の部分です。
+プロトコルは  ``get_poem`` を直接呼び出す代わりに、 ``twisted.internet.defer`` モジュールにある `maybeDeferred <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L84>`_ という名前のラッパー関数を使います。
+
+..
     <P>The factory is straightforward — it’s just saving a reference to the proxy service so that protocol instances can call the <CODE>get_poem</CODE> method. The protocol is where the action is. Instead of calling <CODE>get_poem</CODE> directly, the protocol uses a wrapper function from the <CODE>twisted.internet.defer</CODE> module named <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L84"><CODE>maybeDeferred</CODE></A>.</P>
+
+``maybeDeferred`` 関数は、異なる関数への参照とそれに渡すオプション引数 (この例では使いません) を受け取ります。
+``maybeDeferred`` は実際にその関数を呼び出し、次のいずれかの振る舞いをします。
+
+..
     <P>The <CODE>maybeDeferred</CODE> function takes a reference to another function, plus some optional arguments to call that function with (we aren’t using any here). Then <CODE>maybeDeferred</CODE> will actually call that function and:</P>
+
+* 関数が遅延オブジェクトを返したら、 ``maybeDeferred`` はその遅延オブジェクトを返します。
+* 関数が失敗を返したら、 ``maybeDeferred`` はその失敗で発火された (``errback`` で) 新しい遅延オブジェクトを返します。
+* 関数が通常の値を返したら、 ``maybeDeferred`` はその値で発火された遅延オブジェクトを返します。
+* 関数が例外を送出したら、 ``maybeDeferred`` は例外をラップした Failure で発火された (``errback`` で) 遅延オブジェクトを返します。
+
+..
     <UL>
     <LI>If the function returns a deferred, <CODE>maybeDeferred</CODE> returns that same deferred, or</LI>
     <LI>If the function returns a Failure, <CODE>maybeDeferred</CODE> returns a new deferred that has been fired (via <CODE>.errback</CODE>) with that Failure, or</LI>
     <LI>If the function returns a regular value, <CODE>maybeDeferred</CODE> returns a deferred that has already been fired with that value as the result, or</LI>
     <LI>If the function raises an exception, <CODE>maybeDeferred</CODE> returns a deferred that has already been fired (via <CODE>.errback()</CODE>) with that exception wrapped in a Failure.</LI>
     </UL>
+
+言い換えると、あなたが渡した関数が決して遅延オブジェクトを返さないものであったとしても、 ``maybeDeferred`` の戻り値は遅延オブジェクトであることが保証されています。
+これによって安全に (例外によって失敗したものでも) 同期関数を呼び出すことができ、遅延オブジェクトを返す非同期関数のように扱うことができます。
+
+* ノート 1:
+    それでも、わすかな違いがあるでしょう。同期関数が返す遅延オブジェクトは発火済みですので、いかなるコールバックもエラー用コールバックもすぐに実行されます。reactor ループの将来的な繰り返しには入りません。
+* ノート 2:
+    あと知恵になりますが、いつも遅延オブジェクトを返す関数を "maybeDeferred" と名付けたことは最善ではありません。しかし、このまま進みます。
+
+..
     <P>In other words, the return value from <CODE>maybeDeferred</CODE> is guaranteed to be a deferred, even if the function you pass in never returns a deferred at all. This allows us to safely call a synchronous function (even one that fails with an exception) and treat it like an asynchronous function returning a deferred.</P>
     <P style="padding-left: 30px;">Note 1: There will still be a subtle difference, though. A deferred returned by a synchronous function has already been fired, so any callbacks or errbacks you add will run immediately, rather than in some future iteration of the reactor loop.</P>
     <P style="padding-left: 30px;">Note 2: In hindsight, perhaps naming a function that always returns a deferred “maybeDeferred” was not the best choice, but there you go.</P>
-    <P>Once the protocol has a real deferred in hand, it can just add some callbacks that send the poem to the client and then close the connection. And that’s it for our first poetry proxy!</P>
+
+プロトコルが遅延オブジェクトを使える状態になると、詩をクライアントに送って接続を閉じるようなコールバックをいくつか追加できます。
+私たちの詩の最初のプロキシにぴったりですね！
 
 ..
+    <P>Once the protocol has a real deferred in hand, it can just add some callbacks that send the poem to the client and then close the connection. And that’s it for our first poetry proxy!</P>
+
+プロキシを実行する
+==================
+..
     <H3>Running the Proxy</H3>
+
+プロキシを試してみるには、次のようにして詩のサーバを起動しておきます。 ::
+
+    python twisted-server-1/fastpoetry.py --port 10001 poetry/fascination.txt
+
+..
     <P>To try out the proxy, start up a poetry server, like this:</P>
     <PRE>python twisted-server-1/fastpoetry.py --port 10001 poetry/fascination.txt</PRE>
+
+そしてプロキシサーバを起動させます。 ::
+
+    python twisted-server-1/poetry-proxy.py --port 10000 10001
+
+..
     <P>And now start a proxy server like this:</P>
     <PRE>python twisted-server-1/poetry-proxy.py --port 10000 10001</PRE>
+
+これで10001番ポートの詩のサーバを10000番ポートでプロキシしてくれるようになります。
+ということで、クライアントにはプロキシを指定します。 ::
+
+    python twisted-client-4/get-poetry.py 10000
+
+..
     <P>It should tell you that it’s proxying poetry on port 10000 for the server on port 10001.<BR>
     Now you can point a client at the proxy:</P>
     <PRE>python twisted-client-4/get-poetry.py 10000</PRE>
-    <P>We’ll use an earlier version of the client that isn’t concerned with poetry transformations. You should see the poem appear in the client window and some text in the proxy window saying it’s fetching the poem from the server. Now run the client again and the proxy should confirm it is using the cached version of the poem, while the client should show the same poem as before.</P>
+
+詩の変換に関知しないクライアントも使えます。
+クライアントのウィンドウには詩が表示され、プロキシのウィンドウにはサーバから詩を取得していることを表すテキストを確認できるでしょう。
+もう一度クライアントを動かせてみると、プロキシはキャッシュにある詩を使っていることを確認できます。もちろん、クライアントは前回と同じ詩を表示します。
 
 ..
+    <P>We’ll use an earlier version of the client that isn’t concerned with poetry transformations. You should see the poem appear in the client window and some text in the proxy window saying it’s fetching the poem from the server. Now run the client again and the proxy should confirm it is using the cached version of the poem, while the client should show the same poem as before.</P>
+
+プロキシ 2.0
+============
+..
     <H3>Proxy 2.0</H3>
+
+以前も言及したように、同じスキームを実現するもうひとつの方法があります。
+これは Poetry Proxy 2.0 として `twisted-server-2/poetry-proxy.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L1>`_ にあります。
+遅延オブジェクトを戻り値として返す前に発火させることができますので、詩がキャッシュに見つかった場合は、プロキシサービスに発火済みの遅延オブジェクトを返させるのです。
+プロキシサービスの `get_poem <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L108>`_ メソッドの新バージョンは次のようになります。
+
+..
     <P>As we mentioned earlier, there’s an alternative way to implement this scheme. This is illustrated in Poetry Proxy 2.0, located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L1"><TT>twisted-server-2/poetry-proxy.py</TT></A>. Since we can fire deferreds before we return them, we can make the proxy service return an already-fired deferred when there’s already a poem in the cache. Here’s the new version of the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L108"><CODE>get_poem</CODE></A> method on the proxy service:</P>
+
+::
+
+        def get_poem(self):
+            if self.poem is not None:
+                print 'Using cached poem.'
+                # return an already-fired deferred
+                return succeed(self.poem)
+
+            print 'Fetching poem from server.'
+            factory = PoetryClientFactory()
+            factory.deferred.addCallback(self.set_poem)
+            from twisted.internet import reactor
+            reactor.connectTCP(self.host, self.port, factory)
+            return factory.deferred
+
+..
     <PRE>    def get_poem(self):
             if self.poem is not None:
                 print 'Using cached poem.'
@@ -120,8 +348,33 @@
             reactor.connectTCP(self.host, self.port, factory)
             return factory.deferred
     </PRE>
+
+`defer.succeed <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L30>`_ 関数は、
+与えられた結果から発火済み遅延オブジェクトを生成する簡単な方法です。
+関数の実装を読んでみると、新しい遅延オブジェクトを生成してそれに ``.callback`` を実行しているだけであることが分かるでしょう。
+なお、失敗として発火済みの遅延オブジェクトが欲しい場合には `defer.fail 
+<http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L52>`_ を使えます。
+
+..
     <P>The <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L30"><CODE>defer.succeed</CODE></A> function is just a handy way to make an already-fired deferred given a result. Read the implementation for that function and you’ll see it’s simply a matter of making a new deferred and then firing it with <CODE>.callback()</CODE>. If we wanted to return an already-failed deferred we could use <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L52"><CODE>defer.fail</CODE></A> instead.</P>
+
+このバージョンでは ``get_poem`` はいつも遅延オブジェクトを返しますので、もはや `プロトコルクラス
+<http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L52>`_ は ``maybeDeferred`` を使う必要がありません。
+(先ほど学んだように、それを使い続けても動きます)
+
+..
     <P>In this version, since <CODE>get_poem</CODE> always returns a deferred, the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L52">protocol class</A> no longer needs to use <CODE>maybeDeferred</CODE> (though it would still work if it did, as we learned above):</P>
+
+::
+
+    class PoetryProxyProtocol(Protocol):
+
+        def connectionMade(self):
+            d = self.factory.service.get_poem()
+            d.addCallback(self.transport.write)
+            d.addBoth(lambda r: self.transport.loseConnection())
+
+..
     <PRE>class PoetryProxyProtocol(Protocol):
 
         def connectionMade(self):
@@ -129,22 +382,98 @@
             d.addCallback(self.transport.write)
             d.addBoth(lambda r: self.transport.loseConnection())
     </PRE>
-    <P>Other than these two changes, the second version of the proxy is just like the first, and you can run it in the same way we ran the original version.</P>
+
+ふたつの変更を除けば、プロキシのセカンドバージョンはファーストにそっくりです。
+そして、元のバージョンと同じ方法で実行できます。
 
 ..
+    <P>Other than these two changes, the second version of the proxy is just like the first, and you can run it in the same way we ran the original version.</P>
+
+まとめ
+======
+..
     <H3>Summary</H3>
+
+このパートでは遅延オブジェクトが返される前にどのようにして発火されることがあるかを学びました。
+これによって、同期 (もしくはたまに同期) コードで使うことができます。
+実現方法はふたつあります。
+
+..
     <P>In this Part we learned how deferreds can be fired before they are returned, and thus we can use them in synchronous (or sometimes synchronous) code. And we have two ways to do that:</P>
+
+* 遅延オブジェクトを返したり普通の値を返したりする (もしくは例外を投げる) 関数を扱うために ``maybeDeferred`` を使います。
+* ``defer.succeed`` と ``defer.fail`` を使って自分自身の遅延オブジェクトを予め発火させることができます。これにより、半同期関数は値に関係なくいつも遅延オブジェクトを返します。
+
+..
     <UL>
     <LI>We can use <CODE>maybeDeferred</CODE> to handle a function that sometimes returns a deferred and other times returns a regular value (or throws an exception), or</LI>
     <LI>We can pre-fire our own deferreds, using <CODE>defer.succeed</CODE> and <CODE>defer.fail</CODE>, so our “semi-synchronous” functions always return a deferred no matter what.</LI>
     </UL>
-    <P>Which technique we choose is really up to us. The former emphasizes the fact that our functions aren’t always asynchronous while the latter makes the client code simpler. Perhaps there’s not a definitive argument for choosing one over the other.</P>
-    <P>Both techniques are made possible because we can add callbacks and errbacks to a deferred after it has fired. And that explains the curious fact we discovered in <A href="http://krondo.com/blog/?p=1825">Part 9</A> and the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-unhandled.py#L1"><TT>twisted-deferred/defer-unhandled.py</TT></A> example. We learned that an “unhandled error” in a deferred, in which either the last callback or errback fails, isn’t reported until the deferred is garbage collected (i.e., there are no more references to it in user code). Now we know why — since we could always add another callback pair to a deferred which does handle that error, it’s not until the last reference to a deferred is dropped that Twisted can say the error was not handled.</P>
-    <P style="padding-left: 30px;">Now that you’ve spent so much time exploring the <CODE>Deferred</CODE> class, which is located in the <CODE>twisted.internet</CODE> package, you may have noticed it doesn’t actually have anything to do with the Internet. It’s just an abstraction for managing callbacks. So what’s it doing there? That is an artifact of Twisted’s history. In the best of all possible worlds (where I am paid millions of dollars to play in the World Ultimate Frisbee League), the <CODE>defer</CODE> module would probably be in <CODE>twisted.python</CODE>. Of course, in that world you would probably be too busy fighting crime with your super-powers to read this introduction. I suppose <A href="http://www.youtube.com/watch?v=KIiUqfxFttM">that’s life</A>.</P>
-    <P>So is that it for deferreds? Do we finally know all their features? Up until a short while ago, that would have been basically the case. But in the meantime, the Twisted developers have been beavering away adding new stuff. With the release of Twisted 10, the <CODE>Deferred</CODE> class acquired a brand new capability. We’ll introduce it in a future Part, but first we’ll take a break from deferreds and look at some other aspects of Twisted, including testing in Part 15.</P>
+
+どちらを選択するかは我々次第です。
+ひとつ目の方法は私たちの関数がいつも非同期であるとは限らないことを強調し、もうひとつの方法はクライアントのコードを簡潔にします。
+おそらく、どちらかを選ぶのに決定的となる主張もないでしょう。
 
 ..
+    <P>Which technique we choose is really up to us. The former emphasizes the fact that our functions aren’t always asynchronous while the latter makes the client code simpler. Perhaps there’s not a definitive argument for choosing one over the other.</P>
+
+発火後でもコールバックとエラー用コールバックを遅延オブジェクトに追加できますので、両方のテクニックを使えます。
+これは":doc:`p09`"と `twisted-deferred/defer-unhandled.py
+<http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-unhandled.py#L1>`_
+の例で発見した興味深いことを説明してくれます。
+遅延オブジェクトにおける「処理されない例外」 (最後のコールバックかエラー用コールバックのどちらかが失敗したときに発生します) はガベージコレクトされるまでレポートされない、ということを学びました (つまり、ユーザーコードからは参照されていません) 。
+しかし今ではその理由が分かります。
+そのようなエラーを処理するコールバックのペアを遅延オブジェクトにいつでも追加できますので、
+Twisted が「そのエラーは処理されなかった」と言うまで、遅延オブジェクトに対する最後の参照が無くなってしまうことはありません。
+
+    ``Deferred`` クラス (`twisted.internet` パッケージにあります) の探求に多くの時間を使ってきましたが、実はインターネットとは関係ないことに気付いたかもしれません。
+    コールバックを管理するための抽象化なのです。そこでは何が行われているのでしょうか？
+    それこそ Twisted が形作られてきた歴史なのです。
+    考えられる最善の言葉 (World Ultimate Frisbee League でプレイするために何百万ドルも払わされるような場合ですが) を挙げるなら、 ``defer`` モジュールは ``twisted.python`` にあるべきでしょう。
+    もちろん、そのような世界では超越した力が働く犯罪と戦うのに忙しすぎて、この入門文書を読めないかもしれません。
+    まぁ、それも人生でしょう。 (`that’s life <http://www.youtube.com/watch?v=KIiUqfxFttM>`_)
+
+..
+    <P>Both techniques are made possible because we can add callbacks and errbacks to a deferred after it has fired. And that explains the curious fact we discovered in <A href="http://krondo.com/blog/?p=1825">Part 9</A> and the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-unhandled.py#L1"><TT>twisted-deferred/defer-unhandled.py</TT></A> example. We learned that an “unhandled error” in a deferred, in which either the last callback or errback fails, isn’t reported until the deferred is garbage collected (i.e., there are no more references to it in user code). Now we know why — since we could always add another callback pair to a deferred which does handle that error, it’s not until the last reference to a deferred is dropped that Twisted can say the error was not handled.</P>
+    <P style="padding-left: 30px;">Now that you’ve spent so much time exploring the <CODE>Deferred</CODE> class, which is located in the <CODE>twisted.internet</CODE> package, you may have noticed it doesn’t actually have anything to do with the Internet. It’s just an abstraction for managing callbacks. So what’s it doing there? That is an artifact of Twisted’s history. In the best of all possible worlds (where I am paid millions of dollars to play in the World Ultimate Frisbee League), the <CODE>defer</CODE> module would probably be in <CODE>twisted.python</CODE>. Of course, in that world you would probably be too busy fighting crime with your super-powers to read this introduction. I suppose <A href="http://www.youtube.com/watch?v=KIiUqfxFttM">that’s life</A>.</P>
+
+さあ、これで遅延オブジェクトについては万全ですか？
+ようやく全ての機能を理解できたのでしょうか？
+少し前まではこれが基本的なケースでした。
+しかし、Twisted の開発者たちは新しい機能を追加してきました。
+Twisted 10 のリリースから、 ``Deferred`` クラスは全く新しいことができます。
+これは後々のパートで紹介するとして、遅延オブジェクトからちょっと離れて、":doc:`p15`"ではテスト方法も含めた Twisted の他の側面にも目を向けてみましょう。
+
+..
+    <P>So is that it for deferreds? Do we finally know all their features? Up until a short while ago, that would have been basically the case. But in the meantime, the Twisted developers have been beavering away adding new stuff. With the release of Twisted 10, the <CODE>Deferred</CODE> class acquired a brand new capability. We’ll introduce it in a future Part, but first we’ll take a break from deferreds and look at some other aspects of Twisted, including testing in Part 15.</P>
+
+おすすめの練習問題
+==================
+..
     <H3>Suggested Exercises</H3>
+
+#. ``.errback()`` を使って予め失敗した遅延オブジェクトを表現するように `twisted-deferred/defer-11.py
+   <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-11.py#L1>`_ の例を修正してみましょう。
+   `defer.fail <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L52>`_ のドキュメントと実装を読んでみてください。
+#. 二時間以上前にキャッシュされた詩は破棄するように、プロキシを修正してみましょう。その詩への次のリクエストはサーバからの再リクエストになります。
+#. プロキシはサーバと二回以上やり取りするのを避けるようにすべきです。
+   しかし、キャッシュに詩が存在しないときに複数のクライアントが同時にリクエストを送ると、プロキシは複数のリクエストを生成することになるでしょう。
+   スローサーバを使えば簡単に確認できます。
+   
+     リクエストをひとつしか生成しないようにプロキシサービスを修正しましょう。
+     今のところ、サービスはふたつの状態しか持ちません。
+     詩がキャッシュにあるかないかだけです。
+     リクエストを生成したものの完了していないことを表す、三つ目の状態を認識させる必要があるでしょう。
+     三つ目の状態で ``get_poem`` メソッドが呼ばれたら、 "`waiters`" リストに遅延オブジェクトを追加します。
+     新しい遅延オブジェクトは ``get_poem`` メソッドの結果になるでしょう。
+     最終的に詩が返されると、待っていた全ての遅延オブジェクトにその詩を渡して発火させて、キャッシュした状態に遷移します。
+     逆に詩の取得に失敗した場合は、待っていた全ての遅延オブジェクトの ``.errback()`` メソッドを発火させ、キャッシュが存在しない状態に遷移します。
+   
+#. プロキシサービスに変換プロキシを追加してみましょう。
+   このサービスは元の変換サービスのように動作すべきです。
+   しかし、変換処理自体には外部サーバを使います。
+
+..
     <OL>
     <LI>Modify the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-11.py#L1"><TT>twisted-deferred/defer-11.py</TT></A> example to illustrate pre-failing deferreds using <CODE>.errback()</CODE>. Read the documentation and implementation of the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L52"><CODE>defer.fail</CODE></A> function.</LI>
     <LI>Modify the proxy so that a cached poem older than 2 hours is discarded, causing the next poetry request to re-request it from the server</LI>
@@ -152,13 +481,3 @@
     Modify the proxy service so that only one request is generated. Right now the service only has two states: either the poem is in the cache or it isn’t. You will need to recognize a third state indicating a request has been made but not completed. When the <CODE>get_poem</CODE> method is called in the third state, add a new deferred to a list of ‘waiters’. That new deferred will be the result of the <CODE>get_poem</CODE> method. When the poem finally comes back, fire all the waiting deferreds with the poem and transition to the cached state. On the other hand, if the poem fails, fire the <CODE>.errback()</CODE> method of all the waiters and transition to the non-cached state.</LI>
     <LI>Add a transformation proxy to the proxy service. This service should work like the original transformation service, but use an external server to do the transformations.</LI>
     </OL>
-
-まとめ
-------
-
-":doc:`p15`"
-
-おすすめの練習問題
-------------------
-
-
