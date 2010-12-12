@@ -20,7 +20,7 @@
     <P>We can get all of those features by using the <TT>twistd</TT> script provided by Twisted. But first we’ll have to change our code a bit.</P>
 
 コンセプト
-=========
+==========
 ..
     <H3>The Concepts</H3>
 
