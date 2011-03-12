@@ -9,10 +9,35 @@
 ..
     <H3>Introduction
 
+ひとつ前の章で、ジェネレータを使って一連の非同期なコールバックを構成する新しい方法を学びました。
+遅延オブジェクトを使うことを含め、非同期操作を繋げる方法としてはふたつのテクニックを利用可能になりましたね。
+
 ..
     In the last Part we learned a new way of structuring sequential asynchronous callbacks using a generator. Thus, including deferreds, we now have two techniques for chaining asynchronous operations together.
+
+けれどもときどき、非同期操作をまとめて並列に実行させたくなりますよね。
+Twisted はシングルスレッドですので、本当に並行して動かすことはできませんが、大事な点は、できる限り素早くタスクグループを実行させるために非同期な入出力を使いたいことです。
+たとえば詩のクライアントでは、同時に複数のサーバから詩をダウンロードします。サーバを順々に回ったりはしません。
+結局のところ、これこそが詩を取得するために Twisted を使う全てなのです。
+
+..
     Sometimes, though, we want to run a group of asynchronous operations in "parallel". Since Twisted is single-threaded they won't really run concurrently, but the point is we want to use asynchronous I/O to work on a group of tasks as fast as possible. Our poetry clients, for example, download poems from multiple servers at the same time, rather than one server after another. That was the whole point of using Twisted for getting poetry, after all.
-    And, as a result, all our poetry clients have had to solve this problem: how do you know when all the asynchronous operations you have started are done? So far we have solved this by collecting our results into a list (like the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L160"><CODE>results</CODE></A> list in client 7.0) and checking the length of the list. We have to be careful to collect failures as well as successful results, otherwise a single failure will cause the program to run forever, thinking there's still work left to do.
+
+そして結果として、すべての詩のクライアントはこの問題を解かなくてはなりませんでした。
+
+    あなたが開始したすべての非同期操作が完了したときを、どうよって知るのでしょうか？
+
+ここまでは、結果をリストに詰め込み (クライアント 7.0 にある `results <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L160>`_ 一覧のように)、 その大きさを確認することで問題を解決してきました。
+成功した結果と同様に、失敗した場合も収集しておくことに気を遣わなくてはなりません。
+さもなくば、ひとつの失敗がプログラムを永久に実行させてしまうことに繋がります。すべきことが残っていると考えてしまうのです。
+
+..
+    And, as a result, all our poetry clients have had to solve this problem: how do you know when all the asynchronous operations you have started are done? So far we have solved this by collecting our results into a list (like the `<http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L160>`_``results``</A> list in client 7.0) and checking the length of the list. We have to be careful to collect failures as well as successful results, otherwise a single failure will cause the program to run forever, thinking there's still work left to do.
+
+ご期待のように、Twisted はこの問題を解決するために利用できる抽象化を持ち合わせています。
+今日はこれを見ていくことにしましょう。
+
+..
     As you might expect, Twisted includes an abstraction you can use to solve this problem and we're going to take a look at it today.
 
 DeferredList
@@ -20,9 +45,16 @@ DeferredList
 ..
     <H3>The DeferredList
 
+`DeferredList <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#593>`_ クラスは遅延オブジェクトのリストをひとつの遅延オブジェクトとして扱えるようにしてくれます。
+これにより、たくさんの非同期操作を開始し、それらすべてが終了したときにだけ知らせてもらえます (それらが成功したか失敗したかに関わらず)。
+いくつかの例を見ていきましょう。
+
 ..
-    The <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#593"><CODE>DeferredList</CODE></A> class allows us to treat a list of deferred objects as a single deferred. That way we can start a bunch of asynchronous operations and get notified only when all of them have finished (regardless of whether they succeeded or failed). Let's look at some examples.
-    In <A href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-1.py#L1"><TT>deferred-list/deferred-list-1.py</TT></A> you will find this code:
+    The `<http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#593>`_``DeferredList``</A> class allows us to treat a list of deferred objects as a single deferred. That way we can start a bunch of asynchronous operations and get notified only when all of them have finished (regardless of whether they succeeded or failed). Let's look at some examples.
+
+`deferred-list/deferred-list-1.py <http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-1.py#L1>`_ には次のコードがあります。
+::
+
     from twisted.internet import defer
 
     def got_results(res):
@@ -32,18 +64,52 @@ DeferredList
     d = defer.DeferredList([])
     print 'Adding Callback.'
     d.addCallback(got_results)
+
+..
+    In `<http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-1.py#L1>`_`deferred-list/deferred-list-1.py`</A> you will find this code:
+    from twisted.internet import defer
+
+    def got_results(res):
+        print 'We got:', res
+
+    print 'Empty List.'
+    d = defer.DeferredList([])
+    print 'Adding Callback.'
+    d.addCallback(got_results)
+
+実行させてみると、次の出力を得られます。 ::
+
+    Empty List.
+    Adding Callback.
+    We got: []
+
+..
     And if you run it, you will get this output:
     Empty List.
     Adding Callback.
     We got: []
+
+いくつか注意しておきましょう。
+
+* ``DeferredList`` は Python の ``list`` から生成されます。ここではリストは空です。しかし、全ての要素が ``Deferred`` オブジェクトでなければならないことがすぐに分かります。
+* ``DeferredList`` はそれ自身が遅延オブジェクト (``Deferred`` から継承されたもの) となります。
+  通常の遅延オブジェクトと同様に、コールバックとエラー用コールバックを追加できるのです。
+* 上述の例では、コールバックは追加されるとすぐに発火されました。 ``DeferredList`` も同じく即座に発火しました。
+  これについては後で議論していきます。
+* 遅延オブジェクトのリストの結果はそのままリスト (空) でした。
+
+..
     Some things to notice:
     <UL>
-    * A <CODE>DeferredList</CODE> is created from a Python <CODE>list</CODE>. In this case the list is empty, but we'll soon see that the list elements must all be <CODE>Deferred</CODE> objects.
-    * A <CODE>DeferredList</CODE> is itself a deferred (it inherits from <CODE>Deferred</CODE>). That means you can add callbacks and errbacks to it just like you would a regular deferred.
-    * In the example above, our callback was fired as soon as we added it, so the <CODE>DeferredList</CODE> must have fired right away. We'll discuss that more in a second.
+    * A ``DeferredList`` is created from a Python ``list``. In this case the list is empty, but we'll soon see that the list elements must all be ``Deferred`` objects.
+    * A ``DeferredList`` is itself a deferred (it inherits from ``Deferred``). That means you can add callbacks and errbacks to it just like you would a regular deferred.
+    * In the example above, our callback was fired as soon as we added it, so the ``DeferredList`` must have fired right away. We'll discuss that more in a second.
     * The result of the deferred list was itself a list (empty).
     </UL>
-    Now look at <A href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-2.py#L1"><TT>deferred-list/deferred-list-2.py</TT></A>:
+
+`deferred-list/deferred-list-2.py <http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-2.py#L1>`_ を見てみましょう。
+::
+
     from twisted.internet import defer
 
     def got_results(res):
@@ -56,18 +122,57 @@ DeferredList
     d.addCallback(got_results)
     print 'Firing d1.'
     d1.callback('d1 result')
-    Now we are creating our <CODE>DeferredList</CODE> with a 1-element list containing a single deferred. Here's the output we get:
+
+..
+    Now look at `<http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-2.py#L1>`_`deferred-list/deferred-list-2.py`</A>:
+
+    from twisted.internet import defer
+
+    def got_results(res):
+        print 'We got:', res
+
+    print 'One Deferred.'
+    d1 = defer.Deferred()
+    d = defer.DeferredList([d1])
+    print 'Adding Callback.'
+    d.addCallback(got_results)
+    print 'Firing d1.'
+    d1.callback('d1 result')
+
+ひとつの遅延オブジェクトを含む、要素がひとつだけのリストから ``DeferredList`` を作りました。
+次のような出力が見られますね。 ::
+
     One Deferred.
     Adding Callback.
     Firing d1.
     We got: [(True, 'd1 result')]
+
+..
+    Now we are creating our ``DeferredList`` with a 1-element list containing a single deferred. Here's the output we get:
+
+    One Deferred.
+    Adding Callback.
+    Firing d1.
+    We got: [(True, 'd1 result')]
+
+さらに注意しておきましょう。
+
+* 今回は ``DeferredList`` はリスト内で遅延オブジェクトを発火させるまでコールバックを発火しませんでした。
+* 結果は依然としてリストですが、ひとつの要素があります。
+* この要素は、ふたつ目の値がリスト内の遅延オブジェクトの結果を表すタプルです。
+
+..
     More things to notice:
     <UL>
-    * This time the <CODE>DeferredList</CODE> didn't fire its callback until we fired the deferred in the list.
+    * This time the ``DeferredList`` didn't fire its callback until we fired the deferred in the list.
     * The result is still a list, but now it has one element.
     * The element is a tuple whose second value is the result of the deferred in the list.
     </UL>
-    Let's try putting two deferreds in the list (<A href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-1.py#L3"><TT>deferred-list/deferred-list-3.py</TT></A>):
+
+リストにふたつの遅延オブジェクトを入れてみましょう。
+(`deferred-list/deferred-list-3.py <http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-1.py#L3>`_)
+::
+
     from twisted.internet import defer
 
     def got_results(res):
@@ -83,14 +188,55 @@ DeferredList
     d1.callback('d1 result')
     print 'Firing d2.'
     d2.callback('d2 result')
+
+..
+    Let's try putting two deferreds in the list (`<http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-1.py#L3>`_`deferred-list/deferred-list-3.py`</A>):
+
+    from twisted.internet import defer
+
+    def got_results(res):
+        print 'We got:', res
+
+    print 'Two Deferreds.'
+    d1 = defer.Deferred()
+    d2 = defer.Deferred()
+    d = defer.DeferredList([d1, d2])
+    print 'Adding Callback.'
+    d.addCallback(got_results)
+    print 'Firing d1.'
+    d1.callback('d1 result')
+    print 'Firing d2.'
+    d2.callback('d2 result')
+
+出力は次のようになります。 ::
+
+    Two Deferreds.
+    Adding Callback.
+    Firing d1.
+    Firing d2.
+    We got: [(True, 'd1 result'), (True, 'd2 result')]
+
+..
     And here's the output:
+
     Two Deferreds.
     Adding Callback.
     Firing d1.
     Firing d2.
     We got: [(True, 'd1 result'), (True, 'd2 result')]
-    At this point it's pretty clear the result of a <CODE>DeferredList</CODE>, at least for the way we've been using it, is a list with the same number of elements as the list of deferreds we passed to the constructor. And the elements of that result list contain the results of the original deferreds, at least if the deferreds succeed. That means the <CODE>DeferredList</CODE> itself doesn't fire until all the deferreds in the original list have fired. And a <CODE>DeferredList</CODE> created with an empty list fires right away since there aren't any deferreds to wait for.
-    What about the order of the results in the final list? Consider <A href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-4.py#L1"><TT>deferred-list/deferred-list-4.py</TT></A>:
+
+ここでは、少なくとも私たちが使ってきた方法では、 ``DeferredList`` の結果が、コンストラクタに渡した遅延オブジェクトのリストと同じ個数の要素を持つリストであることがとてもはっきりしています。
+そして、結果のリストの要素は元の遅延オブジェクトの結果を含んでいます。少なくとも遅延オブジェクトが成功した場合は。
+これは、 ``DeferredList`` 自体は元のリストにあった全ての遅延オブジェクトが発火し終わるまで発火しないことを意味します。
+見方を変えると、空のリストから生成された ``DeferredList`` は、待つべき遅延オブジェクトがありませんので、即座に発火します。
+
+..
+    At this point it's pretty clear the result of a ``DeferredList``, at least for the way we've been using it, is a list with the same number of elements as the list of deferreds we passed to the constructor. And the elements of that result list contain the results of the original deferreds, at least if the deferreds succeed. That means the ``DeferredList`` itself doesn't fire until all the deferreds in the original list have fired. And a ``DeferredList`` created with an empty list fires right away since there aren't any deferreds to wait for.
+
+最終的なリストにおける結果の順番はどうなるでしょうか？
+`deferred-list/deferred-list-4.py <http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-4.py#L1>`_ について考えましょう。
+::
+
     from twisted.internet import defer
 
     def got_results(res):
@@ -106,14 +252,57 @@ DeferredList
     d2.callback('d2 result')
     print 'Firing d1.'
     d1.callback('d1 result')
-    Now we are firing <CODE>d2</CODE> first and then <CODE>d1</CODE>. Note the deferred list is still constructed with <CODE>d1<CODE> and <CODE>d2</CODE> in their original order. Here's the output:</CODE></CODE><CODE><CODE>
+
+..
+    What about the order of the results in the final list? Consider `<http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-4.py#L1>`_`deferred-list/deferred-list-4.py`</A>:
+
+    from twisted.internet import defer
+
+    def got_results(res):
+        print 'We got:', res
+
+    print 'Two Deferreds.'
+    d1 = defer.Deferred()
+    d2 = defer.Deferred()
+    d = defer.DeferredList([d1, d2])
+    print 'Adding Callback.'
+    d.addCallback(got_results)
+    print 'Firing d2.'
+    d2.callback('d2 result')
+    print 'Firing d1.'
+    d1.callback('d1 result')
+
+``d2`` を最初に発火させ、それから ``d1`` を発火させました。
+それでも、 ``d1`` と ``d2`` が元の順番を保って遅延オブジェクトのリストが構成されています。
+出力は次の通りです。 ::
+
     Two Deferreds.
     Adding Callback.
     Firing d2.
     Firing d1.
     We got: [(True, 'd1 result'), (True, 'd2 result')]
+
+..
+    Now we are firing ``d2`` first and then ``d1``. Note the deferred list is still constructed with ``d1`` and ``d2`` in their original order. Here's the output:````````
+    Two Deferreds.
+    Adding Callback.
+    Firing d2.
+    Firing d1.
+    We got: [(True, 'd1 result'), (True, 'd2 result')]
+
+出力のリストは元々の遅延オブジェクトのリストと同じ順番で結果を持っています。それぞれの遅延オブジェクトが発火された順番ではありません。
+これはとても素晴らしいことです。
+生成された操作とそれぞれの結果を簡単に関連付けることができますからね
+(たとえば、どの詩がどのサーバから届いたか、など)。
+
+..
     The output list has the results in the same order as the original list of deferreds, not the order those deferreds happened to fire in. Which is very nice, because we can easily associate each individual result with the operation that generated it (for example, which poem came from which server).
-    Alright, what happens if one or more of the deferreds in the list fails? And what are those <CODE>True</CODE> values doing there? Let's try the example in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-5.py#L1"><TT>deferred-list/deferred-list-5.py</TT></A>:
+
+よし、それでは、リスト内のひとつ以上の遅延オブジェクトが失敗したら何が起きるでしょうか？
+また、 ``True`` である値はどうなるでしょうか？
+`deferred-list/deferred-list-5.py <http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-5.py#L1>`_ の例で試してみましょう。
+::
+
     from twisted.internet import defer
 
     def got_results(res):
@@ -127,36 +316,120 @@ DeferredList
     d1.callback('d1 result')
     print 'Firing d2 with errback.'
     d2.errback(Exception('d2 failure'))
-    Now we are firing <CODE>d1</CODE> with a normal result and <CODE>d2</CODE> with an error. Ignore the <CODE>consumerErrors</CODE> option for now, we'll get back to it. Here's the output:
+
+..
+    Alright, what happens if one or more of the deferreds in the list fails? And what are those ``True`` values doing there? Let's try the example in `<http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-5.py#L1>`_`deferred-list/deferred-list-5.py`</A>:
+
+    from twisted.internet import defer
+
+    def got_results(res):
+        print 'We got:', res
+
+    d1 = defer.Deferred()
+    d2 = defer.Deferred()
+    d = defer.DeferredList([d1, d2], consumeErrors=True)
+    d.addCallback(got_results)
+    print 'Firing d1.'
+    d1.callback('d1 result')
+    print 'Firing d2 with errback.'
+    d2.errback(Exception('d2 failure'))
+
+``d1`` は通常の結果になるように発火させ、 ``d2`` はエラーにしています。
+ここでは ``consumerErrors`` オプションは無視しておいてください。後で見ていきます。
+出力は次のようになります。 ::
+
     Firing d1.
     Firing d2 with errback.
-    We got: [(True, 'd1 result'), (False, &lt;twisted.python.failure.Failure &lt;type 'exceptions.Exception'&gt;&gt;)]
-    Now the tuple corresponding to <CODE>d2</CODE> has a <CODE>Failure</CODE> in slot two, and <CODE>False</CODE> in slot one. At this point it should be pretty clear how a <CODE>DeferredList</CODE> works (but see the Discussion below):
-    <UL>
-    * A <CODE>DeferredList</CODE> is constructed with a list of deferred objects.
-    * A <CODE>DeferredList</CODE> is itself a deferred whose result is a list of the same length as the list of deferreds.
-    * The <CODE>DeferredList</CODE> fires after all the deferreds in the original list have fired.
-    * Each element of the result list corresponds to the deferred in the same position as the original list. If that deferred succeeded, the element is <CODE>(True, result)</CODE> and if the deferred failed, the element is <CODE>(False, failure)</CODE>.
-    * A <CODE>DeferredList</CODE> never fails, since the result of each individual deferred is collected into the list no matter what (but again, see the Discussion below).
-    </UL>
-    Now let's talk about that <CODE>consumeErrors</CODE> option we passed to the <CODE>DeferredList</CODE>. If we run the same code but without passing the option (<A href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-6.py#L1"><TT>deferred-list/deferred-list-6.py</TT></A>), we get this output:
+    We got: [(True, 'd1 result'), (False, <twisted.python.failure.Failure <type 'exceptions.Exception'>>)]
+
+..
+    Now we are firing ``d1`` with a normal result and ``d2`` with an error. Ignore the ``consumerErrors`` option for now, we'll get back to it. Here's the output:
     Firing d1.
     Firing d2 with errback.
-    We got: [(True, 'd1 result'), (False, &gt;twisted.python.failure.Failure &gt;type 'exceptions.Exception'&lt;&lt;)]
+    We got: [(True, 'd1 result'), (False, <twisted.python.failure.Failure <type 'exceptions.Exception'>>)]
+
+``d2`` に対応するタプルの値は、ふたつ目のスロットは ``Failure`` で、ひとつ目のスロットは ``False`` です。
+この時点では、 ``DeferredList`` がどのように動作するかは非常に明快でしょう (とはいえ、以下の「議論」にも目を通してくださいね)。
+
+* ``DeferredList`` は遅延オブジェクトのリストから構築されます。
+* ``DeferredList`` は、その結果が与えられたリストと同じ長さのリストである、それ自身が遅延オブジェクトでもあります。
+* ``DeferredList`` は元のリストに含まれる全ての遅延オブジェクトが発火した後で、発火します。
+* 結果のリストの個別の要素は、元のリストと同じ位置の遅延オブジェクトに対応します。
+  遅延オブジェクトが成功した場合の要素は ``(True, result)`` であり、失敗した場合は ``(False, failure)`` になります。
+* ``DeferredList`` は決して失敗しません。何があろうとも個々の遅延オブジェクトの結果はリストに収集されるからです (しかし繰り返しになりますが、以下の「議論」にも目を通してくださいね)。
+
+..
+    Now the tuple corresponding to ``d2`` has a ``Failure`` in slot two, and ``False`` in slot one. At this point it should be pretty clear how a ``DeferredList`` works (but see the Discussion below):
+
+    * A ``DeferredList`` is constructed with a list of deferred objects.
+    * A ``DeferredList`` is itself a deferred whose result is a list of the same length as the list of deferreds.
+    * The ``DeferredList`` fires after all the deferreds in the original list have fired.
+    * Each element of the result list corresponds to the deferred in the same position as the original list. If that deferred succeeded, the element is ``(True, result)`` and if the deferred failed, the element is ``(False, failure)``.
+    * A ``DeferredList`` never fails, since the result of each individual deferred is collected into the list no matter what (but again, see the Discussion below).
+
+
+``DeferredList`` に渡した ``consumeErrors`` オプションについて考えましょう。
+オプションを渡さないで同じコードを実行させると (`deferred-list/deferred-list-6.py <http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-6.py#L1>`_)、以下の出力を得られます。 ::
+
+    Firing d1.
+    Firing d2 with errback.
+    We got: [(True, 'd1 result'), (False, <twisted.python.failure.Failure <type 'exceptions.Exception'>>)]
     Unhandled error in Deferred:
     Traceback (most recent call last):
     Failure: exceptions.Exception: d2 failure
-    If you recall, the "Unhandled error in Deferred" message is generated when a deferred is garbage collected and the last callback in that deferred failed. The message is telling us we haven't caught all the potential asynchronous failures in our program. So where is it coming from in our example? It's clearly not coming from the <CODE>DeferredList</CODE>, since that succeeds. So it must be coming from <CODE>d2</CODE>.
-    A <CODE>DeferredList</CODE> needs to know when each deferred it is monitoring fires. And the <CODE>DeferredList</CODE> does that in the usual way — by adding a callback and errback to each deferred. And by default, the callback (and errback) return the original result (or failure) after putting it in the final list. And since returning the original failure from the errback triggers the next errback, <CODE>d2</CODE> remains in the failed state after it fires.
-    But if we pass <CODE>consumeErrors=True</CODE> to the <CODE>DeferredList</CODE>, the errback added by the <CODE>DeferredList</CODE> to each deferred will instead return <CODE>None</CODE>, thus "consuming" the error and eliminating the warning message. We could also handle the error by adding our own errback to <CODE>d2</CODE>, as in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-7.py#L1"><TT>deferred-list/deferred-list-7.py</TT></A>.
+
+..
+    Now let's talk about that ``consumeErrors`` option we passed to the ``DeferredList``. If we run the same code but without passing the option (`<http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-6.py#L1>`_`deferred-list/deferred-list-6.py`</A>), we get this output:
+    Firing d1.
+    Firing d2 with errback.
+    We got: [(True, 'd1 result'), (False, <twisted.python.failure.Failure <type 'exceptions.Exception'>>)]
+    Unhandled error in Deferred:
+    Traceback (most recent call last):
+    Failure: exceptions.Exception: d2 failure
+
+もし思い出せるなら、"Unhandled error in Deferred" というメッセージは、遅延オブジェクトがゴミ回収され (原文: garbage collected) 遅延オブジェクト内の最後のコールバックが失敗したときに生成されます。
+このメッセージは、プログラムにある全ての潜在的な非同期の失敗を捕まえていなかった、ということを教えてくれます。
+ではここでの例だと、その失敗はどこからやってきたのでしょうか？
+``DeferredList`` からでないことは明らかです。成功しますから。
+ということで、 ``d2`` からに違いありません。
+
+..
+    If you recall, the "Unhandled error in Deferred" message is generated when a deferred is garbage collected and the last callback in that deferred failed.
+    The message is telling us we haven't caught all the potential asynchronous failures in our program.
+    So where is it coming from in our example?
+    It's clearly not coming from the ``DeferredList``, since that succeeds. So it must be coming from ``d2``.
+
+``DeferredList`` は監視しているそれぞれの遅延オブジェクトがいつ発火するかを知る必要があります。
+``DeferredList`` は他と変わらない方法でこれを実行します。それぞれの遅延オブジェクトにコールバックとエラー用コールバックを付与します。
+デフォルトでは、コールバック (エラー用コールバックも) は最終的なリストに結果を詰め込んだ後で、元の結果 (もしくは失敗) を返します。
+エラー用コールバックから元の失敗を返すと次のエラー用コールバックを発動させることになりますので、 ``d2`` は発火後にも失敗した状態のままなのです。
+
+..
+    A ``DeferredList`` needs to know when each deferred it is monitoring fires.
+    And the ``DeferredList`` does that in the usual way — by adding a callback and errback to each deferred.
+    And by default, the callback (and errback) return the original result (or failure) after putting it in the final list.
+    And since returning the original failure from the errback triggers the next errback, ``d2`` remains in the failed state after it fires.
+
+しかし ``DeferredList`` に ``consumeErrors=True`` を渡すと、個々の遅延オブジェクトに対して ``DeferredList`` が追加したエラー用コールバックは、
+失敗の代わりに ``None`` を返します。
+したがって、エラーを消費し ("consuming")、警告メッセージを取り除きます。
+また、 `deferred-list/deferred-list-7.py <http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-7.py#L1>`_ にあるように、 ``d2`` に独自のエラー用コールバックを付け足すことでエラーを処理することもできます。
+
+..
+    But if we pass ``consumeErrors=True`` to the ``DeferredList``, the errback added by the ``DeferredList`` to each deferred will instead return ``None``, thus "consuming" the error and eliminating the warning message.
+    We could also handle the error by adding our own errback to ``d2``, as in `<http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-7.py#L1>`_`deferred-list/deferred-list-7.py`</A>.
 
 クライアント 8.0
 ================
 ..
     <H3>Client 8.0
 
-..
-    Version 8.0 of our Get Poetry Now! client uses a <CODE>DeferredList</CODE> to find out when all the poetry has finished (or failed). You can find the new client in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L1"><TT>twisted-client-8/get-poetry.py</TT></A>. Once again the only change is in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L151"><CODE>poetry_main</CODE></A>. Let's look at the important changes:
+バージョン 8.0 の Get Poetry Now! クライアントは、全ての詩が完了 (あるいは失敗) したときを判別するために ``DeferredList`` を使います。
+新しいクライアントは `twisted-client-8/get-poetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L1>`_ にあります。
+繰り返しになりますが、変更箇所は `poetry_main <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L151>`_ にしかありません。
+重要な変更部分を見ていきましょう。
+::
+
         ...
         ds = []
 
@@ -167,30 +440,83 @@ DeferredList
 
         dlist = defer.DeferredList(ds, consumeErrors=True)
         dlist.addCallback(lambda res : reactor.stop())
-    You may wish to compare it to the same section of <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L180"><CODE>client 7.0</CODE></A>.
-    In client 8.0, we don't need the <CODE>poem_done</CODE> callback or the <CODE>results</CODE> list. Instead, we put each deferred we get back from <CODE>get_transformed_poem</CODE> into a list (<CODE>ds</CODE>) and then create a <CODE>DeferredList</CODE>. Since the <CODE>DeferredList</CODE> won't fire until all the poems have finished or failed, we just add a callback to the <CODE>DeferredList</CODE> to shutdown the reactor. In this case, we aren't using the result from the <CODE>DeferredList</CODE>, we just need to know when everything is finished. And that's it!
+
+..
+    Version 8.0 of our Get Poetry Now! client uses a ``DeferredList`` to find out when all the poetry has finished (or failed). You can find the new client in `<http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L1>`_`twisted-client-8/get-poetry.py`</A>. Once again the only change is in `<http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L151>`_``poetry_main``</A>. Let's look at the important changes:
+        ...
+        ds = []
+
+        for (host, port) in addresses:
+            d = get_transformed_poem(host, port)
+            d.addCallbacks(got_poem)
+            ds.append(d)
+
+        dlist = defer.DeferredList(ds, consumeErrors=True)
+        dlist.addCallback(lambda res : reactor.stop())
+
+`client 7.0 <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L180>`_ の同じセクションと比較したくなるかもしれませんね。
+
+..
+    You may wish to compare it to the same section of `<http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L180>`_``client 7.0``</A>.
+
+クライアント 8.0 では ``poem_done`` コールバックも ``results`` リストも必要ありません。
+その代わりに ``get_transformed_poem`` から受け取ったそれぞれの遅延オブジェクトをリスト (``ds``) に入れて、 ``DeferredList`` を生成します。
+``DeferredList`` は全ての詩に対する処理が完了するまで発火しませんので、reactor を停止させるために ``DeferredList`` にコールバックを追加します。
+今回は ``DeferredList`` の結果を使っていません。 すべてが完了したことを知りたいだけなのです。
+これだけです！
+
+..
+    In client 8.0, we don't need the ``poem_done`` callback or the ``results`` list. Instead, we put each deferred we get back from ``get_transformed_poem`` into a list (``ds``) and then create a ``DeferredList``. Since the ``DeferredList`` won't fire until all the poems have finished or failed, we just add a callback to the ``DeferredList`` to shutdown the reactor. In this case, we aren't using the result from the ``DeferredList``, we just need to know when everything is finished. And that's it!
 
 議論
 ====
 ..
     <H3>Discussion
 
+図37に、 ``DeferredList`` がどのように動作するかを示します。
+
+.. _figure37:
+
+.. figure:: images/p18_deferred-list.png
+
+    図37：DeferredList の結果
+
 ..
-    We can visualize how a <CODE>DeferredList</CODE> works in Figure 37:<BR>
-    <DIV id="attachment_2590" class="wp-caption alignnone" style="width: 615px"><A href="./part18_files/deferred-list.png"><IMG src="./part18_files/deferred-list.png" alt="Figure 37: the result of a DeferredList" title="Figure 37: the result of a DeferredList" width="605" height="340" class="size-full wp-image-2590"></A><P class="wp-caption-text">Figure 37: the result of a DeferredList</DIV>
-    Pretty simple, really. There are a couple options to <CODE>DeferredList</CODE> we haven't covered, and which change the behavior from what we have described above. We will leave them for you to explore in the Exercises below.
-    In the next Part we will cover one more feature of the <CODE>Deferred</CODE> class, a feature recently introduced in Twisted 10.1.0.
+    We can visualize how a ``DeferredList`` works in Figure 37:<BR>
+    <DIV id="attachment_2590" class="wp-caption alignnone" style="width: 615px>`_`<./part18_files/deferred-list.png>`_<IMG src="./part18_files/deferred-list.png" alt="Figure 37: the result of a DeferredList" title="Figure 37: the result of a DeferredList" width="605" height="340" class="size-full wp-image-2590>`_</A><P class="wp-caption-text>`_Figure 37: the result of a DeferredList</DIV>
+
+非常にシンプルですね。
+``DeferredList`` にはここで触れていないオプションがいくつかあり、それによって上述の振る舞いを変えることができます。
+これは文末の「おすすめの練習問題」であなたが追求していってください。
+
+..
+    Pretty simple, really. There are a couple options to ``DeferredList`` we haven't covered, and which change the behavior from what we have described above. We will leave them for you to explore in the Exercises below.
+
+次のパート (":doc:`p19`") では ``Deferred`` クラスのもうひとつの機能をおさえておきましょう。
+これは Twisted 10.1.0、つまり比較的最近になって導入された機能です。
+
+..
+    In the next Part we will cover one more feature of the ``Deferred`` class, a feature recently introduced in Twisted 10.1.0.
 
 おすすめの練習問題
 ------------------
 ..
     <H3>Suggested Exercises
 
+* ``DeferredList`` の `ソースコード <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#5933>`_ を読んでみてください。
+* コンストラクタの ``fireOnOneCallback`` と ``fireOnOneErrback`` オプション引数を試してみられるように `deferred-list` の例を修正してください。
+  どちらか片方 (もしくは両方) を使うようなシナリオに合わせてみましょう。
+* ``DeferredList`` のリストを使って ``DeferredList`` を作成できますか？
+  可能な場合は、その結果はどのように見えるでしょうか？
+* 全ての詩をダウンロードし終えるまで何も出力しないようにクライアント 8.0 を修正してください。
+  今回は ``DeferredList`` からの結果を使うことになるでしょう。
+* ``DeferredDict`` の意味を定義して、それを実装してください。
+
 ..
     <OL>
-    * Read the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#5933">source code</A> for the <CODE>DeferredList</CODE>.
-    * Modify the examples in <TT>deferred-list</TT> to experiment with the optional constructor arguments <CODE>fireOnOneCallback</CODE> and <CODE>fireOnOneErrback</CODE>. Come up with scenarios where you would use one or the other (or both).
-    * Can you create a <CODE>DeferredList</CODE> using a list of <CODE>DeferredList</CODE>s? If so, what would the result look like?
-    * Modify client 8.0 so that it doesn't print out anything until all the poems have finished downloading. This time you will use the result from the <CODE>DeferredList</CODE>.
-    * Define the semantics of a <CODE>DeferredDict</CODE> and then implement it.
+    * Read the `<http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#5933>`_source code</A> for the ``DeferredList``.
+    * Modify the examples in `deferred-list` to experiment with the optional constructor arguments ``fireOnOneCallback`` and ``fireOnOneErrback``. Come up with scenarios where you would use one or the other (or both).
+    * Can you create a ``DeferredList`` using a list of ``DeferredList``s? If so, what would the result look like?
+    * Modify client 8.0 so that it doesn't print out anything until all the poems have finished downloading. This time you will use the result from the ``DeferredList``.
+    * Define the semantics of a ``DeferredDict`` and then implement it.
     </OL>
