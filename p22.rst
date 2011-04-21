@@ -9,24 +9,90 @@
 ..
     <h3 class="lwe-editable-pre">All Done
 
+ほんとに！ここまで付き合ってくれてありがとう。
+この連載を書き始めたときはこんなに長くなる、もしくはこんなに時間がかかるとは思っていませんでした。
+でも、楽しんで書いてこられたし、あなたも楽しんで読んできてくれたと願っています。
+
 ..
-    Whew! Thank you for sticking with me. When I started this series I didn't realize it was going to be this long, or take this much time to make. But I have enjoyed creating it and hope you have enjoyed reading it.
-    Now that I have finished, I will look into the possibility of generating a PDF format. No promises, though.
+    Whew! Thank you for sticking with me.
+    When I started this series I didn't realize it was going to be this long, or take this much time to make.
+    But I have enjoyed creating it and hope you have enjoyed reading it.
+
+ここで筆をおきますが、PDF 化できる方法を検討してみます。
+まぁ約束できませんけど。 (訳注: 英語版は PDF 化されました - `Twisted Intro: PDF version <http://krondo.com/?p=3022>`_)
+
+..
+    Now that I have finished, I will look into the possibility of generating a PDF format.
+    No promises, though.
+
+Twisted を学び続ける方法をいくつか提案して、このシリーズを締めたいと思います。
+
+..
     I would like to conclude with a few suggestions on how to continue your Twisted education.
+
+さらに読むべきもの
+==================
+..
     <h3 class="lwe-editable-pre">Further Reading
-    First, I would recommend reading the Twisted <a href="http://twistedmatrix.com/trac/wiki/Documentation" class="lwe-editable-pre">online documentation</a>. Although it is much-maligned, I think it's better than it is often given credit for.
-    If you want to use Twisted for web programming, then Jean-Paul Calderone has a well-regarded series called "<a href="http://jcalderone.livejournal.com/50562.html" class="lwe-editable-pre">Twisted Web in 60 Seconds</a>". I suspect it will take a little longer than that to read, though.
-    There is also a <a href="http://www.amazon.com/gp/product/0596100329?ie=UTF8&tag=jpcalsjou-20&linkCode=as2&camp=1789&creative=9325&creativeASIN=0596100329" class="lwe-editable-pre">Twisted Book</a>, which I can't say much about as I haven't read it.
-    But more important than any of those, I think, is to read the <a href="http://twistedmatrix.com/trac/browser/trunk" class="lwe-editable-pre">Twisted source code</a>. Since that code is written by people who know Twisted very well, it is an excellent source of examples for how do to things the "Twisted Way".
+
+まずは Twisted の `オンラインドキュメント <http://twistedmatrix.com/trac/wiki/Documentation>`_ を読むことです。
+たくさんけなされていますが、評判より良いと思います。
+
+..
+    First, I would recommend reading the Twisted `online documentation <http://twistedmatrix.com/trac/wiki/Documentation>`_.
+    Although it is much-maligned, I think it's better than it is often given credit for.
+
+Twisted を Web プログラミングで使うなら、Jean-Paul Calderone のよく知られた "`Twisted Web in 60 Seconds <http://jcalderone.livejournal.com/50562.html>`_" という連載があります。
+読むのに60秒以上かかるんじゃないかと思いますけどね。
+
+..
+    If you want to use Twisted for web programming, then Jean-Paul Calderone has a well-regarded series called "`Twisted Web in 60 Seconds <http://jcalderone.livejournal.com/50562.html>`_".
+    I suspect it will take a little longer than that to read, though.
+
+`Twisted Book <http://www.amazon.com/gp/product/0596100329?ie=UTF8&tag=jpcalsjou-20&linkCode=as2&camp=1789&creative=9325&creativeASIN=0596100329>`_ もあります。
+これに関しては読んだことがありませんので多くを語れませんが。
+
+..
+    There is also a `Twisted Book <http://www.amazon.com/gp/product/0596100329?ie=UTF8&tag=jpcalsjou-20&linkCode=as2&camp=1789&creative=9325&creativeASIN=0596100329>`_, which I can't say much about as I haven't read it.
+
+ともあり、私が考えるもっと重要なことは、 `Twisted のソースコード <http://twistedmatrix.com/trac/browser/trunk>`_ を読むことです。
+このコードは Twisted を熟知した人たちが書いていますので、"Twisted なやり方" で何かを実行する極上のソースコード例です。
+
+..
+    But more important than any of those, I think, is to read the `Twisted source code <http://twistedmatrix.com/trac/browser/trunk>`_.
+    Since that code is written by people who know Twisted very well, it is an excellent source of examples for how do to things the "Twisted Way".
+
+おすすめの練習問題
+==================
+..
     <h3 class="lwe-editable-pre">Suggested Exercises
-    <ol class="">
+
+* これまでに書いた同期プログラムを Twisted に移植しましょう。
+* 新しい Twisted プログラムをスクラッチから書いてみましょう。
+* Twisted の `バグデータベース <http://twistedmatrix.com/trac/report>`_ からバグをひとつ選んで、修正してください。
+  Twisted の開発者にパッチを送ってください。
+  あなたが貢献するための `プロセス <http://twistedmatrix.com/trac/wiki/ContributingToTwistedLabs>`_ を忘れずに読んでくださいね。
+
+..
     * Port a synchronous program you wrote to Twisted.
     * Write a new Twisted program from scratch.
-    * Pick a bug from the Twisted <a href="http://twistedmatrix.com/trac/report" class="lwe-editable-pre">bug database</a> and fix it. Submit a patch to the Twisted developers. Don't forget to read about the <a href="http://twistedmatrix.com/trac/wiki/ContributingToTwistedLabs" class="lwe-editable-pre">process</a> for making your contribution.
-    </ol>
+    * Pick a bug from the Twisted `bug database <http://twistedmatrix.com/trac/report>`_ and fix it.
+      Submit a patch to the Twisted developers.
+      Don't forget to read about the `process <http://twistedmatrix.com/trac/wiki/ContributingToTwistedLabs>`_ for making your contribution.
+
+本当にお終い
+============
+..
     <h3 class="lwe-editable-pre">The End, Really
-    Happy Hacking!<br>
+
+ハッピー・ハッキング！
+
+.. _figure47:
+
+.. figure:: images/p22_theend1.png
+
+    図47：お終い
+
+..
+    Happy Hacking!
     <div id="attachment_2890" class="wp-caption aligncenter" style="width: 475px"><a href="./part22_files/theend1.png"><img src="./part22_files/theend1.png" alt="Figure 47: The End" title="Figure 47: The End" width="465" height="284" class="size-full wp-image-2890"></a><p class="wp-caption-text lwe-editable-pre">Figure 47: The End</div>
-    		<div class="fixed"></div>
-    			</div>
-    </div>
