@@ -37,5 +37,8 @@ Twisted 入門
     Deferreds En Masse <p18>
     欲しいと思っていても考えを改めると <p19>
     車輪の中の車輪: Twisted と Erlang <p20>
-    Twisted と Haskell <p21>
+    おろそかにならないようにゆっくりと: Twisted と Haskell <p21>
     おわりに <p22>
+
+ドキュメントのソースコードは `github <https://github.com/skitazaki/twisted-intro-ja>`_ にあります。
+誤字/誤訳などはそちらでお知らせください。
