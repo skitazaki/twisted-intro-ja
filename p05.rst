@@ -52,7 +52,7 @@ Transports
 
 Protocols
 ^^^^^^^^^
-Twisted のプロトコルは同じく interface_ モジュールの IProtocol_ で定義されます。予想通り、プロトコルオブジェクトは プロトコル_ を実装します。つまり、Twisted におけるプロトコルの特定の実装はあるネットワークプロトコル、FTP_ や IMAP_ や自分たちの目的のために作った名も無きプロトコルのようなもの、を実装すべきということです。私たちの詩のプロトコルはそのようなもののひとつですが、これは接続が確立されるとすぐに詩の全てのバイトを単純に送ります。一方で、接続が閉じられるのは詩の終わりです。
+Twisted のプロトコルは同じく interface_ モジュールの IProtocol_ で定義されます。予想通り、プロトコルオブジェクトは プロトコル_ を実装します。つまり、Twisted におけるプロトコルの特定の実装はあるネットワークプロトコル、 FTP_ や IMAP_ や自分たちの目的のために作った名も無きプロトコルのようなもの、を実装すべきということです。私たちの詩のプロトコルはそのようなもののひとつですが、これは接続が確立されるとすぐに詩の全てのバイトを単純に送ります。一方で、接続が閉じられるのは詩の終わりです。
 
 .. _IProtocol: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1111
 .. _プロトコル: http://en.wikipedia.org/wiki/Protocol_(computing)
@@ -71,7 +71,7 @@ Protocol Factories
 ^^^^^^^^^^^^^^^^^^
 それぞれの接続にはプロトコルが必要であり、プロトコルは私たちが実装するクラスのインスタンスかもしれません。Twisted に接続を管理させますので、新しい接続が作られたときはいつでもその場その場で適切なプロトコルを生成する方法が必要です。プロトコルのインスタンスを作るのはプロトコルファクトリの仕事です。
 
-たぶん推察の通り、プロトコルファクトリ API は interface_ モジュールの IProtocolFactory_ で定義されます。プロトコルファクトリはデザインパターンの Factory_ の一例であり、その通りに動作します。``buildProtocol`` メソッドは呼び出される度に新しいプロトコルインスタンスを返すことになっています。これは、新しい接続の度に新しいプロトコルインスタンスを生成するために Twisted が使うメソッドです。
+たぶん推察の通り、プロトコルファクトリ API は interface_ モジュールの IProtocolFactory_ で定義されます。プロトコルファクトリはデザインパターンの Factory_ の一例であり、その通りに動作します。 ``buildProtocol`` メソッドは呼び出される度に新しいプロトコルインスタンスを返すことになっています。これは、新しい接続の度に新しいプロトコルインスタンスを生成するために Twisted が使うメソッドです。
 
 .. _IProtocolFactory: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1259
 .. _Factory: http://en.wikipedia.org/wiki/Factory_pattern

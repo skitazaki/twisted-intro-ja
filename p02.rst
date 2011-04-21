@@ -44,12 +44,12 @@ CPU はネットワークよりはるかに高速ですが、それでも、ほ�
 
     python blocking-server/slowpoetry.py --port 10000 poetry/ecstasy.txt
 
-`netcat <http://netcat.sourceforge.net/>`_ プログラムを使える場合は次のようにテストできます。
+`netcat <http://netcat.sourceforge.net/>`_ [*]_ プログラムを使える場合は次のようにテストできます。
 ::
 
     netcat localhost 10000
 
-    訳注：コマンド名が ``netcat`` ではなく ``nc`` の処理系もあるかもしれません。
+.. [*] 訳注: コマンド名が ``netcat`` ではなく ``nc`` の処理系もあるかもしれません。
 
 サーバが動作していれば、詩が画面にゆっくりと流れてくるでしょう。スゴイ！(訳注：Ecstasy! と掛けてるから英語だとおもしろい、というジョーク) また、サーバがバイトを送出するごとに一行ずつ出力していることに気付くでしょう。完全に詩を送りきってしまうと、サーバは接続を切断します。
 
