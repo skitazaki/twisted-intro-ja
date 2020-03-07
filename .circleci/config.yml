@@ -25,19 +25,25 @@ jobs:
           command: python --version && python3 --version
           name: Show Python versions
       - run:
-          command: make html
+          command: cd docs && make html
           name: Build HTML documents
       - persist_to_workspace:
-          root: _build
+          root: docs/_build
           paths: html
   docs-deploy:
     docker:
-      - image: node:12
+      - image: alpine:3
     steps:
       - checkout
       - attach_workspace:
-          at: _build
-
+          at: docs/_build
+      - run:
+          command: |
+            mv docs/_build/html twisted-intro-ja
+            tar -cjf twisted-intro-ja.tar.bz2 twisted-intro-ja
+          name: Create a document package
+      - store_artifacts:
+          path: twisted-intro-ja.tar.bz2
 workflows:
   main:
     jobs:
@@ -45,3 +51,6 @@ workflows:
       - docs-deploy:
           requires:
             - docs-build
+          filters:
+            branches:
+              only: master

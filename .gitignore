@@ -1,5 +1,1 @@
-_build/
-.Python
-bin/
-include/
-lib/
+docs/_build/
