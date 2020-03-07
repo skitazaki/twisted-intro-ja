@@ -1,0 +1,47 @@
+version: 2.1
+
+orbs:
+  python: circleci/python@0.2.1
+
+jobs:
+  docs-build:
+    executor:
+      name: python/default
+      tag: "3.8"
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - pip-{{ checksum "requirements.txt" }}  # equivalent to python/load-cache
+            - pip-{{ checksum "requirements.txt" }}-console_script
+      - python/install-deps
+      - python/save-cache
+      - save_cache:
+          key: pip-{{ checksum "requirements.txt" }}-console_script
+          paths:
+            # `sphinx-build` command is installed in user space
+            - /home/circleci/.local/bin/
+      - run:
+          command: python --version && python3 --version
+          name: Show Python versions
+      - run:
+          command: make html
+          name: Build HTML documents
+      - persist_to_workspace:
+          root: _build
+          paths: html
+  docs-deploy:
+    docker:
+      - image: node:12
+    steps:
+      - checkout
+      - attach_workspace:
+          at: _build
+
+workflows:
+  main:
+    jobs:
+      - docs-build
+      - docs-deploy:
+          requires:
+            - docs-build
