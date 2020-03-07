@@ -25,10 +25,10 @@ jobs:
           command: python --version && python3 --version
           name: Show Python versions
       - run:
-          command: make html
+          command: cd docs && make html
           name: Build HTML documents
       - persist_to_workspace:
-          root: _build
+          root: docs/_build
           paths: html
   docs-deploy:
     docker:
@@ -36,7 +36,7 @@ jobs:
     steps:
       - checkout
       - attach_workspace:
-          at: _build
+          at: docs/_build
 
 workflows:
   main:
