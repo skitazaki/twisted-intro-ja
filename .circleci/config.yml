@@ -44,11 +44,44 @@ jobs:
           name: Create a document package
       - store_artifacts:
           path: twisted-intro-ja.tar.bz2
+  docs-publish:
+    # Publish HTML documents on GitHub Pages.
+    # See the following article for the steps
+    # Deploying documentation to GitHub Pages with continuous integration - CircleCI
+    # (https://circleci.com/blog/automatically-deploy-private-docker-images-to-aws-ecr/)
+    docker:
+      - image: node:12
+    steps:
+      - checkout
+      - attach_workspace:
+          at: docs/_build
+      - run:
+          name: Disable jekyll builds
+          command: touch docs/_build/html/.nojekyll
+      - run:
+          name: Install and configure dependencies
+          command: |
+            npm install -g --silent gh-pages@2.2.0
+            git config user.email "circleci-build@example.com"
+            git config user.name "circleci-build"
+      - add_ssh_keys:
+          fingerprints:
+            - "3d:1b:ea:ac:e3:4a:85:32:a5:95:7b:43:f2:01:8e:09"
+      - run:
+          name: Deploy docs to gh-pages branch
+          command: gh-pages --dotfiles --message "[skip ci] Publish GiHub Pages" --dist docs/_build/html
+
 workflows:
   main:
     jobs:
       - docs-build
       - docs-deploy:
+          requires:
+            - docs-build
+          filters:
+            branches:
+              only: master
+      - docs-publish:
           requires:
             - docs-build
           filters:
