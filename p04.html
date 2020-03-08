@@ -1,0 +1,214 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート4: Twisted で詩を &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート5: もっと Twisted の詩を" href="p05.html" />
+    <link rel="prev" title="パート3: 目を向けてみましょう" href="p03.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート4: Twisted で詩を</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p03.html">パート3: 目を向けてみましょう</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p05.html">パート5: もっと Twisted の詩を</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="twisted">
+<h1>パート4: Twisted で詩を<a class="headerlink" href="#twisted" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id1">
+<h2>最初の Twisted クライアント<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>Twisted はサーバを書くために使われることが多いのですが、クライアントの方が簡単ですし、できるだけ簡単なところから始めていくことにしましょう。最初の詩のクライアントを Twisted を使って書いてみましょう。ソースコードは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py">twisted-client-1/get-poetry.py</a> にあります。その前にサーバを立ち上げておきましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10000</span> <span class="n">poetry</span><span class="o">/</span><span class="n">ecstasy</span><span class="o">.</span><span class="n">txt</span> <span class="o">--</span><span class="n">num</span><span class="o">-</span><span class="nb">bytes</span> <span class="mi">30</span>
+<span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10001</span> <span class="n">poetry</span><span class="o">/</span><span class="n">fascination</span><span class="o">.</span><span class="n">txt</span>
+<span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10002</span> <span class="n">poetry</span><span class="o">/</span><span class="n">science</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>そうしたら、次のようにしてクライアントを実行してみてください。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">client</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">.</span><span class="n">py</span> <span class="mi">10000</span> <span class="mi">10001</span> <span class="mi">10002</span>
+</pre></div>
+</div>
+<p>以下のような出力を得られるでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="n">got</span> <span class="mi">60</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10000</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="n">got</span> <span class="mi">10</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10001</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">10</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10002</span>
+<span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="n">got</span> <span class="mi">30</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10000</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">10</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10002</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="n">got</span> <span class="mi">10</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10001</span>
+<span class="o">...</span>
+<span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="mi">3003</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="mi">623</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="mi">653</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span>
+<span class="n">Got</span> <span class="mi">3</span> <span class="n">poems</span> <span class="ow">in</span> <span class="mi">0</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mf">10.134220</span>
+</pre></div>
+</div>
+<p>Twisted を使っていない非同期クライアントと一緒ですね。本質的に全く同じことをしていますので驚くようなことではありません。どのように動作しているかを理解するためにソースコードを見ていきましょう。これから議論していくソースコードを確認できるようにクライアントのファイルをエディタで開いてください。</p>
+<blockquote>
+<div><p>注意：パート１で述べたように、いくつかの非常に低レベルな API を使うことから Twisted の使い方を学習していきます。このようにすることで、Twisted の抽象化レイヤを回避し、内側から外側 (inside out) に向かって Twisted のことを学んでいけます。しかしこのことは、始めに学習するたくさんの API は実際のコードを書くときにはあまり使わない、ということを意味します。最初の方のプログラムは練習用の課題として記憶に留めておくだけで構いません。製品レベルのソフトウェアの書き方の例ではありません。</p>
+</div></blockquote>
+<p>Twisted クライアントは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py#L53">PoetrySocket</a> オブジェクトの集合を生成することから始めます。PoetrySocket は実際のネットワークソケットを作り、サーバに接続し、ノンブロッキングモードに切り替えることで自身を初期化します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="bp">self</span><span class="o">.</span><span class="n">sock</span> <span class="o">=</span> <span class="n">socket</span><span class="o">.</span><span class="n">socket</span><span class="p">(</span><span class="n">socket</span><span class="o">.</span><span class="n">AF_INET</span><span class="p">,</span> <span class="n">socket</span><span class="o">.</span><span class="n">SOCK_STREAM</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">sock</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">address</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">sock</span><span class="o">.</span><span class="n">setblocking</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>以降では、ソケットを直接扱うような抽象化のレベルに出会うことはなくなるでしょう。でも、今のところはまだ必要です。ネットワーク接続を確立した後では、 <code class="docutils literal notranslate"><span class="pre">PoetrySocket</span></code> は自分自身を <code class="docutils literal notranslate"><span class="pre">addReader</span></code> メソッドを介して <code class="docutils literal notranslate"><span class="pre">reactor</span></code> に渡します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># tell the Twisted reactor to monitor this socket for reading</span>
+<span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">addReader</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>このメソッドは、データが来るかを監視していて欲しいファイルディスクリプタを Twisted に渡します。ファイルディスクリプタとコールバックではなくオブジェクトを Twisted に渡しているのは何故でしょう？そして、Twisted は間違いなく詩に特有のコードを持ち合わせていないのに、私たちが渡したオブジェクトの扱い方をどうやって知るのでしょうか？私を信じてください。確認しましたから。 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py">twisted.internet.interfaces</a> モジュールを開いて、私に付いてきてくださいね。</p>
+</div>
+<div class="section" id="id2">
+<h2>Twisted のインターフェイス<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>Twisted には <code class="docutils literal notranslate"><span class="pre">interfaces</span></code> と呼ばれるサブモジュールがたくさんあります。それぞれが <code class="docutils literal notranslate"><span class="pre">Interface</span></code> クラスの集まりを定義しています。バージョン 8.0 では、Twisted は <a class="reference external" href="http://www.zope.org/Products/ZopeInterface">zope.interface</a> をそれらのクラスの基底クラスとして使っていますが、このパッケージの詳細は私たちにとっては取り立てて重要ではありません。あなたがまさに目にしてしているもののように、私たちが興味あるのは Twisted 自身 におけるインターフェイスのサブクラスなのです。</p>
+<p>インターフェイスの主な目的のひとつはドキュメントです。Python プログラマなら間違いなく <a class="reference external" href="http://en.wikipedia.org/wiki/Duck_typing">ダックタイピング</a> に慣れているでしょう。原則としてオブジェクトの型はクラス階層における位置ではなく外部に公開されたインターフェイスによって決定される、ということです。したがって、同じ公開インターフェイスを表す二つのオブジェクト (アヒルのように歩き、アヒルのように鳴く、というやつです) は、ダックタイピングが考慮されている限り、同じようなものなのです (a duck!)。とはいえ、インターフェイスではアヒルのように歩くとは何たるかを特定する方法はいくぶん定式化されています。</p>
+<p><code class="docutils literal notranslate"><span class="pre">twisted.internet.interfaces</span></code> のソースコードを <code class="docutils literal notranslate"><span class="pre">addReader</span></code> メソッドの定義まで進めてください。 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L801">IReactorFDSet</a> インターフェイスで宣言されており、次のようになっているでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">addReader</span><span class="p">(</span><span class="n">reader</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    I add reader to the set of file descriptors to get read events for.</span>
+
+<span class="sd">    @param reader: An L{IReadDescriptor} provider that will be checked for</span>
+<span class="sd">                   read events until it is removed from the reactor with</span>
+<span class="sd">                   L{removeReader}.</span>
+
+<span class="sd">    @return: C{None}.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">IReactorFDSet</span></code> は Twisted の reactor が実装するインターフェイスの内のひとつです。すべての Twisted の reactor には上記の docstring で説明されているように動く <code class="docutils literal notranslate"><span class="pre">addReader</span></code> と呼ばれるメソッドがあります。メソッド宣言には <code class="docutils literal notranslate"><span class="pre">self</span></code> 引数がありません。公開インターフェイスを宣言することにしか関与せず、 <code class="docutils literal notranslate"><span class="pre">self</span></code> 引数は実装の一部 (つまり、呼び出し側が <code class="docutils literal notranslate"><span class="pre">self</span></code> を明示的に渡さない、ということです) であるからです。インターフェイスオブジェクトは決してインスタンス化されませんし、現実の実装の基底クラスとして使われることもありません。</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><strong>ノート１：</strong> 技術的なことをいうと、 <code class="docutils literal notranslate"><span class="pre">IReactorFDSet</span></code> はファイルディスクリプタを待ち受けるような reactor によって実装されているだけです。私が知る限りでは、現在利用可能な全ての reactor の実装がそうです。</p></li>
+<li><p><strong>ノート２：</strong> インターフェイスはドキュメント以外にも活用できます。
+<code class="docutils literal notranslate"><span class="pre">zope.interface</span></code> モジュールは、クラスがひとつ以上のインターフェイスを実装することを明示的に宣言できるようにし、実行時にそれらの宣言を検証する機構を提供します。
+適合 (adaptation) の概念もサポートします。あるインターフェイスを直接にはサポートしていないかもしれないオブジェクトにそのインターフェイスを動的に提供することです。しかし、より進んだユースケースには踏み込みません。</p></li>
+<li><p><strong>ノート３：</strong> インターフェイスと <a class="reference external" href="http://www.python.org/dev/peps/pep-3119/">抽象基底クラス</a> の類似性に気付いたでしょうか。
+最近になって Python の言語機構に加えられたものです。ここではその類似性と違いについて考えを進めませんが、
+Glyph の <a class="reference external" href="http://glyph.twistedmatrix.com/2009/02/explaining-why-interfaces-are-great.html">エッセイ</a> を読んでみるのも良いでしょう。
+彼は Twisted プロジェクトの創始者であり、そのエッセイは核心に触れるものです。</p></li>
+</ul>
+</div></blockquote>
+<p>上述の docstring によれば、 <code class="docutils literal notranslate"><span class="pre">addReader</span></code> の <code class="docutils literal notranslate"><span class="pre">reader</span></code> 引数は <code class="docutils literal notranslate"><span class="pre">IReadDescriptor</span></code> インターフェイスを実装しているべきです。このため、 <code class="docutils literal notranslate"><span class="pre">PoetrySocket</span></code> オブジェクトもそうしなくてはいけません。
+この新しいインターフェイスを見つけるためにモジュールのソースコードをスクロールしていくと、次の記述に出会います。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">IReadDescriptor</span><span class="p">(</span><span class="n">IFileDescriptor</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">doRead</span><span class="p">():</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Some data is available for reading on your descriptor.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">PoetrySocket</span></code> オブジェクトの <code class="docutils literal notranslate"><span class="pre">doRead</span></code> の実装も見つかるでしょう。Twisted の reactor に呼ばれたときはいつでも非同期にソケットからデータを読み込みます。このため、 <code class="docutils literal notranslate"><span class="pre">doRead</span></code> は実際のところコールバックです。しかし、Twisted に直接渡すのではなく、 <code class="docutils literal notranslate"><span class="pre">doRead</span></code> メソッドと一緒にオブジェクト内で渡します。これは Twisted フレームワークではよくある書き方です。関数を渡すのではなく、所定のインターフェイスを実装したオブジェクトを渡します。この方法だと、単一の引数で関連するコールバック (インターフェイスで定義されているメソッド) の集合を渡せるようになります。また、オブジェクトに保存された共有状態を介してコールバック同士でお互いに通信させられます。</p>
+<p>それでは、 <code class="docutils literal notranslate"><span class="pre">PoetrySocket</span></code> オブジェクトで実装されているその他のコールバックは何でしょうか？ <code class="docutils literal notranslate"><span class="pre">IReadDescriptor</span></code> は <code class="docutils literal notranslate"><span class="pre">IFileDescriptor</span></code> の子クラスであることに注意してください。 <code class="docutils literal notranslate"><span class="pre">IReadDescriptor</span></code> を実装している全てのオブジェクトは <code class="docutils literal notranslate"><span class="pre">IFileDescriptor</span></code> も実装しなくてはいけない、ということです。ソースコードをもう少しスクロールしていくと、次の記述があります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">IFileDescriptor</span><span class="p">(</span><span class="n">ILoggingContext</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    A file descriptor.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">fileno</span><span class="p">():</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span> <span class="nf">connectionLost</span><span class="p">(</span><span class="n">reason</span><span class="p">):</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+<p>docstring を示しましたが、これらのコールバックの目的は名前からして明確です。 <code class="docutils literal notranslate"><span class="pre">fileno</span></code> は着目しているファイルディスクリプタを返すべきですし、 <code class="docutils literal notranslate"><span class="pre">connectionLost</span></code> は接続を閉じたときに呼ばれます。そして、 <code class="docutils literal notranslate"><span class="pre">PoetrySocket</span></code> オブジェクトもこうしたメソッドを実装していることが分かりますね。</p>
+<p>最後に、 <code class="docutils literal notranslate"><span class="pre">IFileDescriptor</span></code> は <code class="docutils literal notranslate"><span class="pre">ILoggingContext</span></code> を継承しています。ここではこれ以上は述べませんが、 <code class="docutils literal notranslate"><span class="pre">logPrefix</span></code> コールバックを実装する必要があるのはこのためです。 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py">interfaces</a> モジュールで詳しいことを確認できます。</p>
+<blockquote>
+<div><p><em>NOTE：</em> <code class="docutils literal notranslate"><span class="pre">doRead</span></code> はソケットが閉じられたときを示す特殊な値を返していることに気付いたかもしれません。
+どうすれば分かるでしょうか？基本的には、これなしでは動作しませんでしたし、何をしているかを確認するために同じインターフェイスの Twisted 内の実装をチラッと見ました。
+これについて腰を据えて学習したいかもしれません。ソフトウェアの文書はたまには間違っていたり不完全なこともあります。
+たぶん、あなたがそのショックから立ち直ったとき、私はパート５を書き終えているでしょう。</p>
+</div></blockquote>
+</div>
+<div class="section" id="id6">
+<h2>コールバックについてもっと詳しく<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>Twisted を使った新しいクライアントは元々の非同期クライアントに極めて近い状態になりました。どちらのクライアントもそれぞれのソケットに接続し、そこから (非同期に) データを読み込みます。大きな違いは、Twisted のクライアントは <code class="docutils literal notranslate"><span class="pre">select</span></code> ループを必要としないことです。Twisted の reactor を代わりに使いますから。</p>
+<p><code class="docutils literal notranslate"><span class="pre">doRead</span></code> コールバックは最も重要なもののひとつです。ソケットから読み込み可能なデータがあると、Twisted はそれを呼び出します。図７にその処理の様子を表します。</p>
+<div class="figure align-default" id="id10">
+<span id="figure7"></span><img alt="_images/p04_reactor-doread.png" src="_images/p04_reactor-doread.png" />
+<p class="caption"><span class="caption-text">図７： <code class="docutils literal notranslate"><span class="pre">doRead</span></code> コールバック</span><a class="headerlink" href="#id10" title="Permalink to this image">¶</a></p>
+</div>
+<p>コールバックが呼び出される度に、最大限のデータを読み込み、ブロックしないで止まります。パート３で述べたように、おかしな挙動でも (ブロックが必要なくても) Twisted は私たちのコードを止めません。記述した通りに実行でき、起こったことを確認できます。Twisted クライアントと同じディレクトリに、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry-broken.py">twisted-client-1/get-poetry-broken.py</a> と呼ばれる壊れたクライアントがあります。このクライアントはふたつの例外を投げる点が、これまで見てきたものと異なります。</p>
+<ol class="arabic simple">
+<li><p>壊れたクライアントはソケットをノンブロッキングにしません。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">doRead</span></code> コールバックはソケットが閉じるまでバイト列を (たぶんブロックしながら) 読み続けるだけです。</p></li>
+</ol>
+<p>それでは、次のようにして壊れたクライアントを実行させてみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">client</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">-</span><span class="n">broken</span><span class="o">.</span><span class="n">py</span> <span class="mi">10000</span> <span class="mi">10001</span> <span class="mi">10002</span>
+</pre></div>
+</div>
+<p>こんな感じの出力になるでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="n">got</span> <span class="mi">3003</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10000</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">653</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10002</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="n">got</span> <span class="mi">623</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10001</span>
+<span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="mi">3003</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="mi">623</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="mi">653</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span>
+<span class="n">Got</span> <span class="mi">3</span> <span class="n">poems</span> <span class="ow">in</span> <span class="mi">0</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mf">10.132753</span>
+</pre></div>
+</div>
+<p>タスクの順番がちょっと違うことを除けば、これは元々のブロッキングクライアントのように見えます。というよりは、壊れたクライアントはブロッキングクライアントであるからに他なりません。コールバック内でブロッキングの <code class="docutils literal notranslate"><span class="pre">recv</span></code> 呼び出しを使うことによって、非同期な Twisted プログラムを同期版に変更しました。ですから、非同期の利点が全くなく、 <code class="docutils literal notranslate"><span class="pre">select</span></code> ループの複雑さに向き合うことになりました。</p>
+<p>Twisted のようなイベントループが提供する種類のマルチタスクは <a class="reference external" href="http://en.wikipedia.org/wiki/Computer_multitasking#Cooperative_multitasking.2Ftime-sharing">cooperative</a> です。Twisted はファイルディスクリプタへの読み書きの準備ができたときに私たちに知らせてくれますが、ブロッキングしない程度の量のデータしか転送しないようにうまく振舞わなくてはいけません。そして、他の種類のブロッキングコール、 <code class="docutils literal notranslate"><span class="pre">os.system</span></code> のようなもの、を避けなくてはいけません。さらに、(CPU に影響を受ける) 長時間の計算を必要とするタスクがあると、それを小さなチャンクに分割するのは私たちの仕事になります。入出力のタスクを可能な限り進められるようにするためです。</p>
+<p>壊れたクライアントがそれでも動作する、ということには意味があることに気をつけてください。きちんと全ての詩をダウンロードしますね。非同期入出力の効率性の利点を享受できない、というだけです。それでも、壊れたクライアントは元々のブロッキングクライアントより非常に早く動作することに気付くかもしれません。壊れたクライアントはプログラム開始時点で全てのサーバに接続するためです。サーバは即座にデータを送り始めて、たとえ (限界まで) 読み込めなくても OS は入力データのいくらかをバッファリングしますので、ブロッキングクライアントは一度にひとつのサーバからしかデータを読み込めませんが効率的に他のサーバからデータを受け取ります。</p>
+<p>しかし、この「トリック」は短い詩のような少量のデータにしか機能しません。もし、たとえば、2000万語からなる、あるハッカーが世界最高の <a class="reference external" href="http://http//en.wikipedia.org/wiki/Lisp_(programming_language)">Lisp</a> インタープリタを書いて本当の愛を勝ち取るという挑戦を綴った大作 (訳注：原文では epic sagas) を三つダウンロードしていたら、オペレーティングシステムのバッファはすぐに満杯になってしまい、壊れたクライアントは元々のブロッキングのものに比べて恐ろしく非効率的になっていたことでしょう。</p>
+</div>
+<div class="section" id="id7">
+<h2>まとめ<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>Twisted を使った最初の詩のクライアントに関してこれ以上述べることはありません。詩を待っている <code class="docutils literal notranslate"><span class="pre">PoetrySockets</span></code> がなくなったら <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py#L74">connectionLost</a> コールバックが reactor をシャットダウンさせる、ということには気をつけた方がよいかもしれません。プログラム内では詩をダウンロードする以外のことをやっていないように思われますのでのでそれほど大したテクニックではありませんが、より低レベルの reactor の API、 <code class="docutils literal notranslate"><span class="pre">removeReader</span></code> と <code class="docutils literal notranslate"><span class="pre">getReaders</span></code> 、を使っています。</p>
+<p>ここでのクライアントの実装に使った <code class="docutils literal notranslate"><span class="pre">Reader</span></code> の API と同様に <code class="docutils literal notranslate"><span class="pre">Writer</span></code> もあります。これは、データを送り出す
+間に監視しておきたいファイルディスクリプタに対して想像通りに動作します。もっと詳しいことは <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py">interfaces</a> ファイルで確認してください。読み込みと書き出しを別々の API にしている理由は、 <code class="docutils literal notranslate"><span class="pre">select</span></code> の呼び出しが二種類のイベント (ファイルディスクリプタは読み書きのそれぞれで有効になる) を区別しているためです。もちろん、同じファイルディスクリプタで両方のイベントを待ち受けることもできます。</p>
+<p>“<a class="reference internal" href="p05.html"><span class="doc">パート5: もっと Twisted の詩を</span></a>”では、もう少し高次元の抽象化を使って Twisted による詩のクライアントの二つ目のバージョンを記述していきます。その過程で、Twisted のインターフェイスと API をもう少し学んでいきます。</p>
+</div>
+<div class="section" id="id9">
+<h2>おすすめの練習問題<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>サーバへの接続に失敗したときにプログラムがクラッシュしないよう直してみましょう。</p></li>
+<li><p>指定された時間で詩が終わらないようならクライアントにタイムアウトさせるようにするために <code class="docutils literal notranslate"><span class="pre">callLater</span></code> を使ってください。詩が時間内に終わるようならタイムアウトをキャンセルできるように、 <code class="docutils literal notranslate"><span class="pre">callLater</span></code> の戻り値を読み取ってください。</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p03.html">パート3: 目を向けてみましょう</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p05.html">パート5: もっと Twisted の詩を</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

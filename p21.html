@@ -1,0 +1,262 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート21: おろそかにならないようにゆっくりと: Twisted と Haskell &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート22: おわりに" href="p22.html" />
+    <link rel="prev" title="パート20: 車輪の中の車輪: Twisted と Erlang" href="p20.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート21: おろそかにならないようにゆっくりと: Twisted と Haskell</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p20.html">パート20: 車輪の中の車輪: Twisted と Erlang</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p22.html">パート22: おわりに</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="twisted-haskell">
+<h1>パート21: おろそかにならないようにゆっくりと: Twisted と Haskell<a class="headerlink" href="#twisted-haskell" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id1">
+<h2>はじめに<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>前回は Twisted と <a class="reference external" href="http://erlang.org/">Erlang</a> が共通に持っているいくつかの考えに細心の注意を払いながら、それぞれを比べました。
+非同期 I/O と reactive プログラミングが Erlang ランライムとプロセスモデルの鍵となるコンポーネントですから、結局のところ、これは非常にシンプルです。</p>
+<p>今日はさらに本題を離れて <a class="reference external" href="http://haskell.org/">Haskell</a> に目を向けてみましょう。
+Erlang とは随分異なる (もちろん Python とも) もうひとつの関数型言語です。
+平行して存在するものは多くありませんが、非同期 I/O が隠蔽しているいくつかを覗いていくことになります。</p>
+</div>
+<div class="section" id="f">
+<h2>大文字 F の付いた関数<a class="headerlink" href="#f" title="Permalink to this headline">¶</a></h2>
+<p>Erlang も関数型言語ですが、信頼性の高い並行モデル - reliable concurrency model - に主眼が置かれています。
+一方で Haskell はどこまで行っても関数で、 <a class="reference external" href="http://en.wikipedia.org/wiki/Functor">functors</a> と <a class="reference external" href="http://en.wikipedia.org/wiki/Monad_%28category_theory%29">monads</a> のように圏論 (<a class="reference external" href="http://en.wikipedia.org/wiki/Category_theory">category theory</a>) から持ち込んだ概念を平然と使えるようにします。</p>
+<p>でも気にしないでください。こうした概念に深入りするつもりはありません (たとえ可能だとしても)。
+その代わり、Haskell のもっと伝統的な関数の機能のひとつ “laziness” に注目していきます。
+多くの関数型言語のように (しかし Erlang は違います)、Haskell は遅延評価 (<a class="reference external" href="http://en.wikipedia.org/wiki/Lazy_evaluation">lazy evaluation</a>) をサポートします。
+評価が遅延される言語では、プログラムのソースコードは「何を計算するのか」に比べて「どうやって計算するのか」を多くは記述しません。
+一般的には、実際に計算を処理することの詳細はコンパイラとランタイムシステムの仕事になります。</p>
+<p>この点についてもう少し言及しておくと、遅延評価される計算が進みにつれて、ランタイムはすべてを一斉に実行するのではなく、部分的に (あるいは遅延させて) 文を評価するかもしれません。
+一般的に、ランタイムは現在の計算を進めるために必要とされる式だけを評価するでしょう。</p>
+<p>次の一行が <code class="docutils literal notranslate"><span class="pre">[1,2,3]</span></code> というリスト (Haskell と Python はいくつかのリスト構文が一緒です) に <code class="docutils literal notranslate"><span class="pre">head</span></code> 、リストの最初の要素を取り出す関数、を適用する簡単な Haskell 文です。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">head</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</div>
+<p><a class="reference external" href="http://www.haskell.org/ghc/">GHC</a> Haskell ランタイムをインストールすると、こんな感じで試すことができます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>[~] ghci
+GHCi, version 6.12.1: http://www.haskell.org/ghc/  : ? for help
+Loading package ghc-prim ... linking ... done.
+Loading package integer-gmp ... linking ... done.
+Loading package base ... linking ... done.
+Prelude&gt; head [1,2,3]
+1
+Prelude&gt;
+</pre></div>
+</div>
+<p>結果は予想したように数字の 1 です。
+Haskell のリスト構文には、いくつかの先頭要素からリストを定義する使いやすい機能があります。
+例えば <code class="docutils literal notranslate"><span class="pre">[2,4</span> <span class="pre">..]</span></code> というリストは 2 から始まる偶数の数列になります。
+どこで終わるのかって？うーん、終わりません。
+Haskell の <code class="docutils literal notranslate"><span class="pre">[2,4</span> <span class="pre">..]</span></code> などのリストは (概念的に) 無限リストを表現します。
+対話的な Haskell プロンプトでこれを評価してみると分かります。
+あなたが入力した式の結果を表示しようとしてくれるでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Prelude</span><span class="o">&gt;</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span><span class="mi">4</span> <span class="o">..</span><span class="p">]</span>
+ <span class="p">[</span><span class="mi">2</span><span class="p">,</span><span class="mi">4</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">8</span><span class="p">,</span><span class="mi">10</span><span class="p">,</span><span class="mi">12</span><span class="p">,</span><span class="mi">14</span><span class="p">,</span><span class="mi">16</span><span class="p">,</span><span class="mi">18</span><span class="p">,</span><span class="mi">20</span><span class="p">,</span><span class="mi">22</span><span class="p">,</span><span class="mi">24</span><span class="p">,</span><span class="mi">26</span><span class="p">,</span><span class="mi">28</span><span class="p">,</span><span class="mi">30</span><span class="p">,</span><span class="mi">32</span><span class="p">,</span><span class="mi">34</span><span class="p">,</span><span class="mi">36</span><span class="p">,</span><span class="mi">38</span><span class="p">,</span><span class="mi">40</span><span class="p">,</span><span class="mi">42</span><span class="p">,</span><span class="mi">44</span><span class="p">,</span><span class="mi">46</span><span class="p">,</span><span class="mi">48</span><span class="p">,</span><span class="mi">50</span><span class="p">,</span><span class="mi">52</span><span class="p">,</span><span class="mi">54</span><span class="p">,</span><span class="mi">56</span><span class="p">,</span><span class="mi">58</span><span class="p">,</span><span class="mi">60</span><span class="p">,</span><span class="mi">62</span><span class="p">,</span><span class="mi">64</span><span class="p">,</span><span class="mi">66</span><span class="p">,</span><span class="mi">68</span><span class="p">,</span><span class="mi">70</span><span class="p">,</span><span class="mi">72</span><span class="p">,</span><span class="mi">74</span><span class="p">,</span><span class="mi">76</span><span class="p">,</span><span class="mi">78</span><span class="p">,</span><span class="mi">80</span><span class="p">,</span><span class="mi">82</span><span class="p">,</span><span class="mi">84</span><span class="p">,</span><span class="mi">86</span><span class="p">,</span><span class="mi">88</span><span class="p">,</span><span class="mi">90</span><span class="p">,</span><span class="mi">92</span><span class="p">,</span><span class="mi">94</span><span class="p">,</span><span class="mi">96</span><span class="p">,</span><span class="mi">98</span><span class="p">,</span><span class="mi">100</span><span class="p">,</span><span class="mi">102</span><span class="p">,</span><span class="mi">104</span><span class="p">,</span><span class="mi">106</span><span class="p">,</span><span class="mi">108</span><span class="p">,</span><span class="mi">110</span><span class="p">,</span><span class="mi">112</span><span class="p">,</span><span class="mi">114</span><span class="p">,</span><span class="mi">116</span><span class="p">,</span><span class="mi">118</span><span class="p">,</span><span class="mi">120</span><span class="p">,</span><span class="mi">122</span><span class="p">,</span><span class="mi">124</span><span class="p">,</span><span class="mi">126</span><span class="p">,</span><span class="mi">128</span><span class="p">,</span><span class="mi">130</span><span class="p">,</span><span class="mi">132</span><span class="p">,</span><span class="mi">134</span><span class="p">,</span><span class="mi">136</span><span class="p">,</span><span class="mi">138</span><span class="p">,</span><span class="mi">140</span><span class="p">,</span><span class="mi">142</span><span class="p">,</span><span class="mi">144</span><span class="p">,</span><span class="mi">146</span><span class="p">,</span>
+<span class="o">...</span>
+</pre></div>
+</div>
+<p>実際には終了しませんので、この計算を停止させるためには <code class="docutils literal notranslate"><span class="pre">Ctrl-C</span></code> を押さなければならないでしょう。
+しかし遅延評価のおかげで、Haskell ではこのような無限リストを何の問題もなく使用できます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Prelude</span><span class="o">&gt;</span> <span class="n">head</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span><span class="mi">4</span> <span class="o">..</span><span class="p">]</span>
+<span class="mi">2</span>
+<span class="n">Prelude</span><span class="o">&gt;</span> <span class="n">head</span> <span class="p">(</span><span class="n">tail</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span><span class="mi">4</span> <span class="o">..</span><span class="p">])</span>
+<span class="mi">4</span>
+<span class="n">Prelude</span><span class="o">&gt;</span> <span class="n">head</span> <span class="p">(</span><span class="n">tail</span> <span class="p">(</span><span class="n">tail</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span><span class="mi">4</span> <span class="o">..</span><span class="p">]))</span>
+<span class="mi">6</span>
+</pre></div>
+</div>
+<p>無限リストの最初と二番目と三番目の要素にそれぞれアクセスしていますが、無限ループはどこにも見当たりませんね。
+これが遅延評価のエッセンスです。
+最初にリスト全体を評価して (こうすると無限ループになってしまいます) リストを <code class="docutils literal notranslate"><span class="pre">head</span></code> 関数に与えるのではなく、Haskell ランタイムは <code class="docutils literal notranslate"><span class="pre">head</span></code> がその処理を終えるのに十分な大きさのリストしか構築しません。
+リストの残りの部分は決して構築されません。計算を続けるために必要ないからです。</p>
+<p><code class="docutils literal notranslate"><span class="pre">tail</span></code> 関数を使ってみると、Haskell はリストをさらに構築させられます。しかしここでも、計算の次のステップを評価するために必要な分だけです。
+一度計算が終了すると、リストの後ろの部分は捨て去ることができます。</p>
+<p>みっつの異なる無限リストを部分的に消費する Haskell コードがあります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Prelude</span><span class="o">&gt;</span> <span class="n">let</span> <span class="n">x</span> <span class="o">=</span> <span class="p">[</span><span class="mf">1.</span><span class="o">.</span><span class="p">]</span>
+<span class="n">Prelude</span><span class="o">&gt;</span> <span class="n">let</span> <span class="n">y</span> <span class="o">=</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span><span class="mi">4</span> <span class="o">..</span><span class="p">]</span>
+<span class="n">Prelude</span><span class="o">&gt;</span> <span class="n">let</span> <span class="n">z</span> <span class="o">=</span> <span class="p">[</span><span class="mi">3</span><span class="p">,</span><span class="mi">6</span> <span class="o">..</span><span class="p">]</span>
+<span class="n">Prelude</span><span class="o">&gt;</span> <span class="n">head</span> <span class="p">(</span><span class="n">tail</span> <span class="p">(</span><span class="n">tail</span> <span class="p">(</span><span class="n">zip3</span> <span class="n">x</span> <span class="n">y</span> <span class="n">z</span><span class="p">)))</span>
+<span class="p">(</span><span class="mi">3</span><span class="p">,</span><span class="mi">6</span><span class="p">,</span><span class="mi">9</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>ここでは、すべてのリストを一緒くたにまとめて、tail の tail の head を取得します。
+繰り返しになりますが、Haskell は問題なくこれを扱えますし、コードを評価し終えるために必要にしか各リストを構築しません。
+図46に Haskell ランタイムが無限リストを消費する - consuming - 様子を図示します。</p>
+<div class="figure align-default" id="id7">
+<span id="figure46"></span><img alt="_images/p21_haskell.png" src="_images/p21_haskell.png" />
+<p class="caption"><span class="caption-text">図46：無限リストを消費する Haskell</span><a class="headerlink" href="#id7" title="Permalink to this image">¶</a></p>
+</div>
+<p>Haskell ランタイムを単純なループとして表現しましたが、複数のスレッドで実装されているかもしれません (Haskell の GHC バージョンを使っているならきっとそうです)。
+しかし注意すべき主要なポイントは、この図がいかに、ネットワークソケットからデータを受信するにつれてその部分部分を消費する reactor ループのように見えるかです。</p>
+<p>非同期 I/O と reactor パターンを、遅延評価の非常に限定的な形式だと考えることもできます。
+非同期 I/O のモットーは「あなたが持っているデータと同じくらいのプロセスのみ持ちます」 <a class="footnote-reference brackets" href="#motto1" id="id2">1</a> です。
+そして遅延評価のモットーは「あなたが必要とするデータと同じくらいのプロセスのみ必要とします」 <a class="footnote-reference brackets" href="#motto2" id="id3">2</a> です。
+さらに、遅延評価される言語はこのモットーをほとんどどこにでも適応します。I/O という限られたスコープだけではありません。</p>
+<dl class="footnote brackets">
+<dt class="label" id="motto1"><span class="brackets"><a class="fn-backref" href="#id2">1</a></span></dt>
+<dd><p>“Only process as much data as you have”</p>
+</dd>
+<dt class="label" id="motto2"><span class="brackets"><a class="fn-backref" href="#id3">2</a></span></dt>
+<dd><p>“Only process as much data as you need”</p>
+</dd>
+</dl>
+<p>しかし遅延評価される言語では、非同期 I/O を使えるようにすることは大きな課題ではないことがポイントです。
+コンパイラとランタイムは、データ構造を少しずつ処理するために設計されており、I/O ストリームの入力チャンクを遅延して処理することは当然のことです。
+このため Erlang ランタイムのように、Haskell ランタイムはソケット抽象化の一部として非同期 I/O を簡単に取り込めます。
+Haskell で詩のクライアントを実装してこのことを見ていきましょう。</p>
+</div>
+<div class="section" id="id4">
+<h2>Haskell での詩<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>初めての Haskell による詩のクライアントは <a class="reference external" href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs">haskell-client-1/get-poetry.hs</a> にあります。
+Erlang のときと同様に、一気に完成バージョンを扱い、もっと学びたくなったときのために、さらに読むべきものを紹介します。</p>
+<p>Haskell も軽量スレッドとプロセスをサポートします。Haskell にとっては Erlang のように中心的な役割ではありませんが。
+Haskell クライアントはダウンロードしたい詩のそれぞれに対してプロセスを生成します。
+ここでキーとなる関数は、軽量スレッド内でソケットに接続し <a class="reference external" href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L48">getPoetry</a> 関数を開始する、 <a class="reference external" href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L64">runTask</a> です。</p>
+<p>このコードの中にたくさんの型宣言があることに気付いたでしょうか。
+Haskellは Python や Erlang とは違って静的型付けです。
+Haskell は明示的に宣言されていない型を自動的に推論します  (推論できない場合はエラーを報告します) ので、個別の変数に型を宣言しません。
+Haskell は副作用のあるコード (つまり、I/O を実行するコード) を純粋な関数からきれいに分離することを要求してきますから、たくさんの関数が <code class="docutils literal notranslate"><span class="pre">IO</span></code> 型 (専門的にはモナドと言います) を含みます。</p>
+<p><code class="docutils literal notranslate"><span class="pre">getPoetry</span></code> 関数には次の行があります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">poem</span> <span class="o">&lt;-</span> <span class="n">hGetContents</span> <span class="n">h</span>
+</pre></div>
+</div>
+<p>これは、ハンドル (つまり TCP ソケット) から詩の全体を読み込むために一度だけ出現します。
+しかし、普通は Haskell は遅延 - lazy - させます。
+Haskell ランタイムは、 <code class="docutils literal notranslate"><span class="pre">select</span></code> ループ内で非同期 I/O を処理する、ひとつ以上の実際のスレッドを持ちます。
+このため、I/O ストリームの遅延評価の可能性を保存しておきます。</p>
+<p>この非同期 I/O が本当に続いていくことを見せるために、詩のそれぞれの行におけるタスク情報を出力する “callback” 関数 -
+<a class="reference external" href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L60">gotLine</a> -
+を含めておきました。
+しかし実のところコールバック関数ではありませんし、これを含めるか否かに関わらずプログラムは非同期 I/O を使うでしょう。
+この呼び出しでさえ、 “gotLine” は、Haskell プログラムでは問題外である命令法の言語 - imperative-language - の考え方を反映します。
+何はともあれ後でもう少し整理するとして、初めての Haskell クライアントを動かしましょうか。
+まずはゆっくりした詩のサーバ (slow poetry servers) をいくつか起動します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10001</span> <span class="n">poetry</span><span class="o">/</span><span class="n">fascination</span><span class="o">.</span><span class="n">txt</span>
+<span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10002</span> <span class="n">poetry</span><span class="o">/</span><span class="n">science</span><span class="o">.</span><span class="n">txt</span>
+<span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10003</span> <span class="n">poetry</span><span class="o">/</span><span class="n">ecstasy</span><span class="o">.</span><span class="n">txt</span> <span class="o">--</span><span class="n">num</span><span class="o">-</span><span class="nb">bytes</span> <span class="mi">30</span>
+</pre></div>
+</div>
+<p>それでは Haskell クライアントをコンパイルしましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">cd</span> <span class="n">haskell</span><span class="o">-</span><span class="n">client</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span>
+<span class="n">ghc</span> <span class="o">--</span><span class="n">make</span> <span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">.</span><span class="n">hs</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">get-poetry</span></code> という名前のバイナリファイルが生成されますので、
+ようやくサーバに対してクライアントを実行できます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">./</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span> <span class="mi">10001</span> <span class="mi">10002</span> <span class="mi">1000</span>
+</pre></div>
+</div>
+<p>次のような出力になります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">12</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="nn">localhost</span><span class="p">:</span><span class="mi">10003</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">1</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="nn">localhost</span><span class="p">:</span><span class="mi">10003</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">30</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="nn">localhost</span><span class="p">:</span><span class="mi">10003</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="n">got</span> <span class="mi">20</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="nn">localhost</span><span class="p">:</span><span class="mi">10002</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">44</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="nn">localhost</span><span class="p">:</span><span class="mi">10003</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="n">got</span> <span class="mi">1</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="nn">localhost</span><span class="p">:</span><span class="mi">10002</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">29</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="nn">localhost</span><span class="p">:</span><span class="mi">10003</span>
+<span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="n">got</span> <span class="mi">36</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="nn">localhost</span><span class="p">:</span><span class="mi">10001</span>
+<span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="n">got</span> <span class="mi">1</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="nn">localhost</span><span class="p">:</span><span class="mi">10001</span>
+<span class="o">...</span>
+</pre></div>
+</div>
+<p>データの任意の大きさの塊ではなく、詩の各行に対して一行ずつ出力していますので、以前の非同期クライアントとは出力がちょっと違いますね。
+しかしお分かりのように、クライアントはひとつずつ順番にではなく、全てのサーバからのデータを一緒に処理しています。
+クライアントは他の詩を待つことなく、最初の詩を受信するとすぐに出力することにも気付いたでしょうか。
+他の詩の受信はそれぞれのペースで進みます。</p>
+<p>よし、クライアントから命令法の残り部分をキレイにして、タスク番号を気にせず、単に詩を受け取るだけのバージョンにしましょう。
+<a class="reference external" href="https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-2/get-poetry.hs">haskell-client-2/get-poetry.hs</a> がそれです。
+非常に短くなっており、それぞれのサーバに対して、ソケットに接続してデータを受け取って送り返すだけですね。</p>
+<p>新しいクライアントをコンパイルしましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">cd</span> <span class="n">haskell</span><span class="o">-</span><span class="n">client</span><span class="o">-</span><span class="mi">2</span><span class="o">/</span>
+<span class="n">ghc</span> <span class="o">--</span><span class="n">make</span> <span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">.</span><span class="n">hs</span>
+</pre></div>
+</div>
+<p>詩のサーバの同じ集合に対して実行します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">./</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span> <span class="mi">10001</span> <span class="mi">10002</span> <span class="mi">10003</span>
+</pre></div>
+</div>
+<p>それぞれの詩のテキストが画面に時折表示されるでしょう。</p>
+<p>サーバの出力から、それぞれのサーバが同時にデータをクライアントに送っていることが分かるでしょう。
+それに加えて、クライアントはできるだけ早く最初の詩の各行を出力します。
+他の二つの詩に対して動作している最中でも、詩の残りの部分を待つことはありません。
+一つ目が終わると二つ目の詩を素早く出力します。これはずっと蓄積されてきたものです。</p>
+<p>私たちが取り立てて何か命令しなくても、これらのすべてが起こります。
+コールバックも、あちこちに受け渡されるメッセージもありません。プログラムにやって欲しいことの正確な詳細があるだけです。
+実行するためにどうすべきかはこれっぽっちもありませんよね。
+残りは Haskell コンパイラとランタイムが面倒をみてくれます。やったね。</p>
+</div>
+<div class="section" id="id5">
+<h2>議論、さらに読むべきもの<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>Twisted から Erlang、そして Haskell へと移ってくる中で、見える部分から見えない部分まで、非同期プログラミングの背後にある考え方でこれらに平行して存在するムーブメントを確認できました。
+Twisted では、非同期プログラミングこそがその存在の中心的な動機です。
+フレームワークとしての Twisted の実装は Python とは分離されており (Python には軽量スレッドのようなコアとなる非同期の抽象化が欠けています)、Twisted を使ってプログラムを書くときは非同期モデルが前面に押し出されるか中心に居座ります。</p>
+<p>Erlang では, 非同期という考え方は依然としてプログラマに見えますが、その詳細は言語とランタイムシステムの組織の一部であり, 同期プロセス同士で非同期メッセージが交換されるように抽象化されます。</p>
+<p>そして最後に Haskell では、非同期 I/O はランタイム内部のもうひとつのテクニックにすぎません。
+プログラマからは広範に隠蔽され、Haskell の中心となる考え方のひとつである遅延評価を提供します。</p>
+<p>この状況に対する何らかの深い洞察を持っているわけではありません。
+多くのそして興味深い非同期モデルが現れる部分と、それを表現できるたくさんの異なる方法を指摘しているだけです。</p>
+<p>Haskell についてここまで述べたことがあなたの興味をそそるなら、さらに学び続けるには <a class="reference external" href="http://www.amazon.com/exec/obidos/ASIN/0596514980/krondonet-20">Real World Haskell</a> がお勧めです。
+この本はプログラム言語の良い入門書がいかにあるべきかのモデルとも言えます。
+あと、私は読んでいませんが、 <a class="reference external" href="http://learnyouahaskell.com/">Learn You a Haskell</a> が良いとの話を聞いたことがあります。</p>
+<p>Twisted 以外の非同期システムの探検と、このシリーズの最後から２番目のパートもこれでお終いです。
+“<a class="reference internal" href="p22.html"><span class="doc">パート22: おわりに</span></a>”が最後です。もっと Twisted について学んでいく方法を紹介しましょう。</p>
+<div class="section" id="id6">
+<h3>おすすめの練習問題<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Twisted と Erlang と Haskell のクライアントをそれぞれ比べてください。</p></li>
+<li><p>詩のサーバに接続するときの失敗を扱えるように Haskell クライアントを修正しましょう。
+ダウンロードできる全ての詩を取得し、ダウンロードできない詩のために妥当なエラーメッセージを出力させます。</p></li>
+<li><p>Twisted を使って作った詩のサーバの、Haskell バージョンを書いてみましょう。</p></li>
+</ol>
+</div>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p20.html">パート20: 車輪の中の車輪: Twisted と Erlang</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p22.html">パート22: おわりに</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

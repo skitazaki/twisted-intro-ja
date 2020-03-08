@@ -1,0 +1,579 @@
+======================
+パート7: Deferred 入門
+======================
+
+コールバックとその結果
+----------------------
+":doc:`p06`"では、次の事実にたどり着きました。コールバックは非同期プログラミングの基礎を成すのです。reactor と向き合う方法というだけでなく、コールバックは私たちが書くどのような Twisted プログラムの構成でも編み込みます。Twisted やどのような reactor ベースの非同期システムを使うときも、私たちのコードを特定の方法で構成しておくことを意味します。reactor ループが呼び出す一連のコールバック・チェーンとして、です。
+
+`get_poetry <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L81>`_ 関数くらい簡単な API でさえも二つのコールバックを要求します。ひとつは通常の結果に対してのもの、もうひとつはエラーに対してのものです。Twisted プログラマとしてはこれらをできる限り使いこなせるようにならなくてはいけませんので、コールバックの最も良い使い方や、これから出くわすかもしれない落とし穴について考えることに少しは時間を割くべきでしょう。
+
+クライアント 3.1 から持ってきた ``get_poetry`` の Twisted バージョンについて考えてみましょう。
+::
+
+    ...
+    def got_poem(poem):
+        print poem
+        reactor.stop()
+
+    def poem_failed(err):
+        print >>sys.stderr, 'poem download failed'
+        print >>sys.stderr, 'I am terribly sorry'
+        print >>sys.stderr, 'try again later?'
+        reactor.stop()
+
+    get_poetry(host, port, got_poem, poem_failed)
+
+    reactor.run()
+
+ここでの基本的な考え方は明らかですね。
+
+#. 詩を取得したら、出力しなさい。
+#. 詩を取得できなかったら、エラーの俳句を出力しなさい。
+#. どちらの場合もプログラムを停止しなさい。
+
+上記の同期版はこんな感じでしょうか。
+::
+
+    ...
+    try:
+        poem = get_poetry(host, port) # the synchronous version of get_poetry
+    except Exception, err:
+        print >>sys.stderr, 'poem download failed'
+        print >>sys.stderr, 'I am terribly sorry'
+        print >>sys.stderr, 'try again later?'
+        sys.exit()
+    else:
+        print poem
+        sys.exit()
+
+コールバックは ``else`` 節でエラー用コールバックは ``except`` のようなものです。エラー用のコールバック呼び出しは非同期においては例外を発生させることで、通常のコールバックは普通の制御フローに相当します。
+
+この二つのバージョンの違いは何でしょう？ひとつは、同期バージョンでは Python インタープリタが次のことを保証します。 ``get_poetry`` がいかなる理由でどのような種類の例外を発生させようとも、 ``except`` ブロックは実行されます。インタープリタが Python のコードを正確に実行してくれると信じるなら、エラーブロックは適切な時に実行されるでしょう。
+
+非同期バージョンと対比してみましょう。 ``poem_failed`` というエラー用コールバックは "私たちの" コードから呼ばれます。 `PoetryClientFactory <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L66>`_ の `clientConnectionFailed <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L77>`_ メソッドです。何かがおかしくなったときにエラーコードを確実に実行させるのは、Python ではなく、私たちの責任です。このため、 ``Failure`` オブジェクトを伴ったエラー用コールバックを呼び出すときは、考えられるあらゆるエラーケースを扱えるようにしなくてはなりません。さもなくば、プログラムは決して辿りつくことのないコールバックを待ってスタックしてしまいます。
+
+このことは、同期と非同期のもう一つの違いを表しています。もしも非同期バージョンで例外をキャッチしていなければ (``try/except`` を使わないで)、Python インタープリタがそれをキャッチしてエラーを表示して終了していたことでしょう。しかし、 ``PoetryClientFactory`` でエラー用コールバックの呼び出しを面倒がって省略していたら、私たちのプログラムは延々と動作し続けるでしょう。さも何も起こっていないかのように。
+
+明らかに非同期プログラムにおけるエラーの扱いは重要であり、いくらかトリッキーです。非同期コードでエラーを処理することは実は通常の場合を扱うよりも大事かもしれません。うまくいくときより遥かに明後日の方向に行ってしまうからです。エラー処理を忘れることは、Twisted を使ったプログラミングでのよくある間違いです。
+
+上記の同期版のコードに関するもうひとつの事実もあります。 ``else`` ブロックがただ一度だけ実行されるか、 ``except`` ブロックがただ一度だけ実行されるかのどちらかです (同期版の ``get_poetry`` は無限ループに陥らないと考えておいてください)。Python インタープリタはそれらの両方を実行するのか ``else`` ブロックを27回実行するのか、すぐには決めません。基本的に Python のプログラムでそうすることは不可能です。
+
+しかし、私たちがコールバックかエラー用コールバックを実行させる責任を負っている、非同期の場合についてもう一度考えてみましょう。お気づきかもしれませんが、いくつかの間違いを犯しているかもしれません。コールバックとエラー用コールバックの両方を呼び出すこともできましたし、コールバックだけを27回呼び出すこともできました。これは ``get_poetry`` を使う人には不幸な結果になってしまいます。docstring は明示的に述べていませんが、次のことは言わずに実際には実行されてしまうのです。 ``try/except`` 節にある ``else`` と ``except`` ブロックのように、 ``get_poetry`` のそれぞれの呼び出しにおいて、コールバックがただ一度だけ実行されるかエラー用コールバックがただ一度だけ実行されます。詩を受け取るか受け取らないかのどちらかなのです。
+
+三つの詩を要求して7回のコールバック呼び出しと2回のエラー用コールバック呼び出しがあったプログラムをデバッグしようとするところを思い浮かべてください。どこから始めましょうか？おそらくコールバックとエラー用コールバックを、それらが同じ ``get_poetry`` 呼び出しに対して二回目の呼び出しがあったときを検知し、例外を送出するように書いてみることになるでしょう。 ``get_poetry`` をそんな感じにしてみましょう。
+
+もう一つ見ておくことがあります。どちらのバージョンもいくつか重複したコードがあります。非同期版は二つの ``reactor.stop`` 呼び出しがあり、同期版は ``sys.exit`` があります。同期版はこんな感じでリファクタリングしましょうか。
+::
+
+    ...
+    try:
+        poem = get_poetry(host, port) # the synchronous version of get_poetry
+    except Exception, err:
+        print >>sys.stderr, 'poem download failed'
+        print >>sys.stderr, 'I am terribly sorry'
+        print >>sys.stderr, 'try again later?'
+    else:
+        print poem
+
+    sys.exit()
+
+似たような方法で非同期版もリファクタリングできるでしょうか？実ははっきりとはしません。コールバックとエラー用コールバックはふたつの異なる関数だからです。では、単一のコールバックに戻さなくてはいけないのでしょうか？
+
+まぁまぁ。コールバックを使うプログラミングに関して分かってきたことのいくつかとして次のことがあります。
+
+#. エラー用コールバックを呼び出すことは大事です。エラー用コールバックは ``except`` ブロックの位置を占めますので、ユーザーはそれらをアテにできる必要があります。私たちの API ではオプショナルな機能などではありません。
+#. 間違ったときにコールバックを呼び出さないことは正しいときに呼び出すのと同じように大事です。典型的なユースケースにおいて、コールバックとエラー用コールバックはお互いに排他的でただ一度だけ呼び出されます。
+#. コールバックを使うと、一般的なコードのリファクタリングも難しくなるかもしれません。
+
+後々のパートでコールバックについてより詳しく説明していきます。しかし、今のところは Twisted にはこうしたことをなんとかするための抽象化がある理由が分かれば十分です。
+
+遅延オブジェクト
+----------------
+非同期プログラミングではコールバックが多用されますし、それらを正しく使うことはいくらかトリッキーになりえますので、Twisted の開発者はコールバックを使うプログラミングを簡単にするために ``Deferred`` と呼ばれる抽象化を作りました。 ``Deferred`` クラスは `twisted.internet.defer <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L132>`_ で定義されています。
+
+    "deferred" という言葉は今日の英語における動詞か形容詞のどちらかです。名詞として使うのは若干不思議に思われるかもしれません。
+    ここからは、私が "the deferred" か "a deferred" というフレーズを使うときは、 ``Deferred`` クラスのインスタンスを指すと考えてください
+    。なぜそれが ``Deferred`` と呼ばれるのかを先々のパートでみていきましょう。
+    "the deferred result" のように、それぞれのフレーズに "result" (結果) という言葉を付け加えてみると理解の助けになるかもしれません。
+    ときおり見ることになりますが、実際にそれが何であるか、というコトなのです。(訳注：名詞として使う "deferred" は「遅延オブジェクト」、クラス名として使われる "Deferred" はそのままの表記とします。)
+
+遅延オブジェクトはコールバック・チェーンのペアを持ちます。ひとつは通常の結果に対するもので、もうひとつはエラーに対するものです。新しく生成された遅延オブジェクトはふたつの空のチェーンを持ちます。コールバックとエラー用コールバックを付け加えることでチェーンを有効化し、通常の結果 (詩が届いた、ということです) か例外 (詩を得られなかったので、その理由です) のどちらかと一緒に遅延オブジェクトを作動 (訳注：fire) させます。遅延オブジェクトを作動させると、適切なコールバックかエラー用コールバックを、それが追加された順番で呼び出します。図１２は、遅延オブジェクトとそのコールバックとエラー用コールバックを表しています。
+
+.. _figure12:
+
+.. figure:: images/p07_deferred-1.png
+
+    図１２：遅延オブジェクト
+
+
+実際に実装してみましょう。遅延オブジェクトは reactor を使いませんので、ループを開始することなくテストできます。
+
+    ``Deferred`` クラスにあり reactor を使う ``setTimeout`` と呼ばれるメソッドに気付いたかもしれません。それは古い使用で、将来のリリースでは存在しなくなるでしょう。深入りせず、使わないでくださいね。
+
+最初の例は `twisted-deferred/defer-1.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-1.py>`_ にあります。
+::
+
+    from twisted.internet.defer import Deferred
+
+    def got_poem(res):
+        print 'Your poem is served:'
+        print res
+
+    def poem_failed(err):
+        print 'No poetry for you.'
+
+    d = Deferred()
+
+    # add a callback/errback pair to the chain
+    d.addCallbacks(got_poem, poem_failed)
+
+    # fire the chain with a normal result
+    d.callback('This poem is short.')
+
+    print "Finished"
+
+このコードでは新しい遅延オブジェクトを作成し、 ``addCallbacks`` メソッドによってコールバックとエラー用コールバックのペアを追加し、 ``callback`` メソッドで通常の結果に対するチェーンを開始させます。もちろん、単一のコールバックしか持ち合わせていませんのでチェーンではありませんが、ここでは問題ではありません。コードを実行させてみると以下の出力を得られるでしょう。
+
+::
+
+    Your poem is served:
+    This poem is short.
+    Finished
+
+簡単ですね。とはいえ、気をつけるべきことがいくつかあります。
+
+#. クライアント 3.1 で使ったコールバックとエラー用コールバックのペアと同じように、私たちが遅延オブジェクトに付け加えたコールバックはそれぞれひとつの引数を取ります。
+   通常の結果かエラーの結果のどちらかです。遅延オブジェクトは複数の引数をサポートすることも明らかにしていきますが、いつでも少なくともひとつは必要ですし、最初の引数は通常の結果かエラーのどちらかです。
+#. 遅延オブジェクトにはコールバックとエラー用コールバックをペアにして追加します。
+#. ``callback`` メソッドは遅延オブジェクトの通常結果を引き起こします。メソッドの引数がその結果です。
+#. ``print`` が出力する順番を見てみると、遅延オブジェクトに合図を送るとすぐにコールバックを呼び出していることが分かります。
+   非同期に実行されている箇所が見当たりません。reactor が動いていないので当然です。いわゆる Python の関数呼び出しと変わりありません。
+
+それでは、次に進んでみましょう。 `twisted-deferred/defer-2.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-2.py>`_ の例では遅延オブジェクトのエラー用コールバックチェーンを実行させます。
+::
+
+    from twisted.internet.defer import Deferred
+    from twisted.python.failure import Failure
+
+    def got_poem(res):
+        print 'Your poem is served:'
+        print res
+
+    def poem_failed(err):
+        print 'No poetry for you.'
+
+    d = Deferred()
+
+    # add a callback/errback pair to the chain
+    d.addCallbacks(got_poem, poem_failed)
+
+    # fire the chain with an error result
+    d.errback(Failure(Exception('I have failed.')))
+
+    print "Finished"
+
+スクリプトを実行してみると以下の出力になるでしょう。
+::
+
+    No poetry for you.
+    Finished
+
+エラー用のコールバックチェーンを開始させるには、 ``callback`` メソッドではなく ``errback`` メソッドを呼び出し、引数はエラー結果になります。コールバックと同じように、合図があるとすぐに呼び出されます。
+
+先ほどの例ではクライアント 3.1 でそうしたように、 ``Failure`` オブジェクトを ``errback`` メソッドに渡しました。これはこれで良いのですが、遅延オブジェクトは ``Exception`` を ``Failure`` に変換してくれます。 `twisted-deferred/defer-3.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-3.py>`_ を見てください。
+::
+
+    from twisted.internet.defer import Deferred
+
+    def got_poem(res):
+        print 'Your poem is served:'
+        print res
+
+    def poem_failed(err):
+        print err.__class__
+        print err
+        print 'No poetry for you.'
+
+    d = Deferred()
+
+    # add a callback/errback pair to the chain
+    d.addCallbacks(got_poem, poem_failed)
+
+    # fire the chain with an error result
+    d.errback(Exception('I have failed.'))
+
+ここでは通常の ``Exception`` を ``errback`` に渡しています。エラー用コールバックの中で、そのクラスとエラー結果自体を出力します。
+こんな出力になります。
+::
+
+    twisted.python.failure.Failure
+    [Failure instance: Traceback (failure with no frames): : I have failed.
+    ]
+    No poetry for you.
+
+    訳注：処理系またはバージョンによっては "type" が出力されるかもしれません。
+    ::
+
+        twisted.python.failure.Failure
+        [Failure instance: Traceback (failure with no frames): &lt;type 'exceptions.Excepti
+        on'&gt;: I have failed.
+        ]
+        No poetry for you.
+
+このことは、遅延オブジェクトを使うときは元々の ``Exception`` を扱えば十分であり、 ``Failure`` は自動的に生成される、ということを意味します。遅延オブジェクトはそれぞれのエラー用コールバックが ``Failure`` インスタンスと共に呼び出されることを保証してくれるのです。
+
+ここまでで、 ``callback`` に進んだ場合と ``errback`` に進んだ場合を見てきました。良きエンジニアがそうであるように、何度も繰り返してみたくなりましたか？コードをより簡潔にするため、 ``lambda`` を使ってコールバックを追加してみましょう。 `twisted-deferred/defer-4.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-4.py>`_ を見てください。
+::
+
+    from twisted.internet.defer import Deferred
+    def out(s): print s
+    d = Deferred()
+    d.addCallbacks(lambda r: out(r), lambda e: out(e))
+    d.callback('First result')
+    d.callback('Second result')
+    print 'Finished'
+
+すると、次の出力を得られます。
+::
+
+    First result
+    Traceback (most recent call last):
+      ...
+    twisted.internet.defer.AlreadyCalledError
+
+これはおもしろいですね！遅延オブジェクトは正常系のコールバックを二回は呼び出させてくれません。実際のところ、遅延オブジェクトはそれが何であっても二回は呼び出されません。これらの例を実際に見てください。
+
+* `twisted-deferred-4.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-4.py>`_
+* `twisted-deferred-5.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-5.py>`_
+* `twisted-deferred-6.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-6.py>`_
+* `twisted-deferred-7.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-7.py>`_
+
+最後の ``print`` 文はひとつも呼ばれていないことに注意してください。 ``callback`` と ``errback`` メソッドは正真正銘の ``Exception`` を送出し、その遅延オブジェクトを既に実行したと知らせてくれます。コールバック・プログラミングではよくある落とし穴のひとつです。遅延オブジェクトは、その落とし穴に私たちが落ちてしまわないようにしてくれます。コールバックを管理するために遅延オブジェクトを使うと、コールバックとエラー用コールバックの両方を呼び出してしまう間違いを犯しませんし、コールバックを 27 回も呼び出してしまうこともありません。やってみれば分かりますが、遅延オブジェクトは即座に例外を送出します。誤った呼び出しをコールバック自体に渡してしまうことはありません。
+
+それでは、遅延オブジェクトは非同期なコードのリファクタリングの助けになるのでしょうか？ `twisted-deferred/defer-8.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-8.py>`_ にある例で考えてみましょう。
+::
+
+    import sys
+
+    from twisted.internet.defer import Deferred
+
+    def got_poem(poem):
+        print poem
+        from twisted.internet import reactor
+        reactor.stop()
+
+    def poem_failed(err):
+        print >>sys.stderr, 'poem download failed'
+        print >>sys.stderr, 'I am terribly sorry'
+        print >>sys.stderr, 'try again later?'
+        from twisted.internet import reactor
+        reactor.stop()
+
+    d = Deferred()
+
+    d.addCallbacks(got_poem, poem_failed)
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(d.callback, 'Another short poem.')
+
+    reactor.run()
+
+基本的には先に示した元々の例と一緒ですが、reactor を動かす追加のコードがあります。reactor が動き始めた後で遅延オブジェクトに命令を飛ばすために `callWhenRunning <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L766>`_ を使っていることに注意してください。 ``callWhenRunning`` は、それが動作するときにコールバックへ渡すためのキーワード引数を追加で受け取る、ということを活用しています。コールバックを登録する多くの Twisted API は同じ習慣に従います。遅延オブジェクトにコールバックを追加する API も同様です。
+
+コールバックとエラー用コールバックの両方が reactor を停止させます。遅延オブジェクトは正常系のコールバックとエラー用コールバックのチェーンをサポートしていますので、一般的なコードをチェーンの二つ目のリンクにリファクタリングできます。 `twisted-deferred/defer-9.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-9.py>`_ で紹介するテクニックです。
+::
+
+    import sys
+
+    from twisted.internet.defer import Deferred
+
+    def got_poem(poem):
+        print poem
+
+    def poem_failed(err):
+        print >>sys.stderr, 'poem download failed'
+        print >>sys.stderr, 'I am terribly sorry'
+        print >>sys.stderr, 'try again later?'
+
+    def poem_done(_):
+        from twisted.internet import reactor
+        reactor.stop()
+
+    d = Deferred()
+
+    d.addCallbacks(got_poem, poem_failed)
+    d.addBoth(poem_done)
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(d.callback, 'Another short poem.')
+
+    reactor.run()
+
+``addBoth`` メソッドは同じ関数をコールバック・チェーンとエラー用コールバック・チェーンの両方に追加します。こうして非同期コードをリファクタリングできましたね。
+
+    **ノート：** この遅延オブジェクトがエラー用コールバック・チェーンを実行してしまうことがあります。
+    これについては先々のパートで議論しますが、とりあえず、遅延オブジェクトに関して学ぶべきことはたくさんある、と肝に命じておいてください。
+
+まとめ
+------
+このパートでは、コールバックを使ったプログラミングを深堀りし、いくつかの潜在的な問題点を認識しました。また、 ``Deferred`` クラスがどれほど私たちを助けてくれるかも見てきました。
+
+#. エラー用コールバックは無視できません。全ての非同期な API で必須です。遅延オブジェクトにはこれへのサポートが組み込まれています。
+#. コールバックを複数回呼び出すと、難解でデバッグが難しい問題を引き起こしやすくなります。
+#. 単純なコールバックを用いたプログラミングはリファクタリングをトリッキーにしてしまいます。遅延オブジェクトを使うと、コールバック・チェーンにリンクを追加し、あるリンクを他の場所に移動させることでリファクタリングできます。
+
+遅延オブジェクトにまつわる話題は尽きません。探求すべき原理と振る舞いはまだまだあります。しかし、詩のクライアントで使い始めるには十分といえるでしょう。":doc:`p08`"でやってみましょう。
+
+おすすめの練習問題
+------------------
+#. 最後の例では ``poem_done`` への引数を無視しています。出力させてみてください。 ``get_poem`` が値を返すようにすると、このことが ``poem_done`` への引数をどのように変えるかを考えてみてください。
+#. 最後のふたつの遅延オブジェクトを使った例を、エラー用コールバック・チェーンを実行するように修正してください。 ``Exception`` を引数としてエラー用コールバックを動かすようにしてくださいね。
+#. ``Deferred`` クラスの `addCallback <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L189>`_ と `addErrback <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L192>`_ メソッドの docstring を読んでください。
+
+..
+    <H2>Part 7: An Interlude,&nbsp; Deferred
+    This continues the introduction started <A href="http://krondo.com/blog/?p=1209">here</A>. You can find an index to the entire series <A href="http://krondo.com/blog/?page_id=1327">here</A>.
+    <H3>Callbacks and Their Consequences
+    In <A href="http://krondo.com/blog/?p=1595">Part 6</A> we came face-to-face with this fact: callbacks are a fundamental aspect of asynchronous programming. Rather than just a way of interfacing with the reactor, callbacks will be woven into the structure of any Twisted program we write. So using Twisted, or any reactor-based asynchronous system, means organizing our code in a particular way, as a series of "callback chains" invoked by a reactor loop.
+    Even an API as simple as our <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L81"><CODE>get_poetry</CODE></A> function required callbacks, two of them in fact: one for normal results and one for errors. Since, as Twisted programmers, we’re going to have to make so much use of them, we should spend a little bit of time thinking about the best ways to use callbacks, and what sort of pitfalls we might encounter.
+    Consider this piece of code that uses the Twisted version of <CODE>get_poetry</CODE> from client 3.1:
+    ...
+    def got_poem(poem):
+        print poem
+        reactor.stop()
+
+    def poem_failed(err):
+        print &gt;&gt;sys.stderr, 'poem download failed'
+        print &gt;&gt;sys.stderr, 'I am terribly sorry'
+        print &gt;&gt;sys.stderr, 'try again later?'
+        reactor.stop()
+
+    get_poetry(host, port, got_poem, poem_failed)
+
+    reactor.run()
+    The basic plan here is clear:
+    <OL>
+    * If we get the poem, print it out.
+    * If we don’t get the poem, print out an Error Haiku.
+    * In either case, end the program.
+    </OL>
+    The ’synchronous analogue’ to the above code might look something like this:
+    ...
+    try:
+        poem = get_poetry(host, port) # the synchronous version of get_poetry
+    except Exception, err:
+        print &gt;&gt;sys.stderr, 'poem download failed'
+        print &gt;&gt;sys.stderr, 'I am terribly sorry'
+        print &gt;&gt;sys.stderr, 'try again later?'
+        sys.exit()
+    else:
+        print poem
+        sys.exit()
+    So the callback is like the <CODE>else</CODE> block and the errback is like the <CODE>except</CODE>. That means invoking the errback is the asynchronous analogue to raising an exception and invoking the callback corresponds to the normal program flow.
+    What are some of the differences between the two versions? For one thing, in the synchronous version the Python interpreter will ensure that, as long as <CODE>get_poetry</CODE> raises any kind of exception at all, for any reason, the <CODE>except</CODE> block will run. If we trust the interpreter to run Python code correctly we can trust that error block to run at the right time.
+    Contrast that with the asynchronous version: the <CODE>poem_failed</CODE> errback is invoked by <EM>our</EM> code, the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L77"><CODE>clientConnectionFailed</CODE></A> method of the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L66"><CODE>PoetryClientFactory</CODE></A>. We, not Python, are in charge of making sure the error code runs if something goes wrong. So we have to make sure to handle every possible error case by invoking the errback with a <CODE>Failure</CODE> object. Otherwise, our program will become "stuck" waiting for a callback that never comes.
+    That shows another difference between the synchronous and asynchronous versions. If we didn’t bother catching the exception in the synchronous version (by not using a <CODE>try</CODE>/<CODE>except</CODE>), the Python interpreter would "catch" it for us and crash to show us the error of our ways. But if we don’t bother calling the errback function in <CODE>PoetryClientFactory</CODE>, our program will just run forever, blissfully unaware that anything is amiss.
+    Clearly, handling errors in an asynchronous program is important, and also somewhat tricky. You might say that handling errors in asynchronous code is actually more important than handling the normal case, as things can go wrong in far more ways than they can go right. Forgetting to handle the error case is a common mistake when programming with Twisted.
+    Here’s another fact about the synchronous code above: either the <CODE>else</CODE> block runs exactly once, or the <CODE>except</CODE> block runs exactly once (assuming the synchronous version of <CODE>get_poetry</CODE> doesn’t enter an infinite loop). The Python interpreter won’t suddenly decide to run them both or, on a whim, run the <CODE>else</CODE> block twenty-seven times. And it would be basically impossible to program in Python if it did!
+    But again, in the asynchronous case <EM>we</EM> are in charge of running the callback or the errback. Knowing us, we might make some mistakes. We could call both the callback and the errback, or invoke the callback twenty-seven times. That would be unfortunate for the users of <CODE>get_poetry</CODE>. Although the docstring doesn’t explicitly say so, it really goes without saying that, like the <CODE>else</CODE> and <CODE>except</CODE> blocks in a <CODE>try</CODE>/<CODE>except</CODE> statement, either the callback will run exactly once or the errback will run exactly once, for each specific call to <CODE>get_poetry</CODE>. Either we get the poem or we don’t.
+    Imagine trying to debug a program that makes three poetry requests and gets seven callback invocations and two errback invocations. Where would you even start? You’d probably end up writing your callbacks and errbacks to detect when they got invoked a second time for the same <CODE>get_poetry</CODE> call and throw an exception right back. Take that, <CODE>get_poetry</CODE>.
+    One more observation: both versions have some duplicate code. The asynchronous version has two calls to <CODE>reactor.stop</CODE> and the synchronous version has two calls to <CODE>sys.exit</CODE>. We might refactor the synchronous version like this:
+    ...
+    try:
+        poem = get_poetry(host, port) # the synchronous version of get_poetry
+    except Exception, err:
+        print &gt;&gt;sys.stderr, 'poem download failed'
+        print &gt;&gt;sys.stderr, 'I am terribly sorry'
+        print &gt;&gt;sys.stderr, 'try again later?'
+    else:
+        print poem
+
+    sys.exit()
+    Can we refactor the asynchronous version in a similar way? It’s not really clear that we can, since the callback and errback are two different functions. Do we have to go back to a single callback to make this possible?
+    Ok, here are some of the insights we’ve discovered about programming with callbacks:
+    <OL>
+    * Calling errbacks is very important. Since errbacks take the place of <CODE>except</CODE> blocks, users need to be able to count on them. They aren’t an optional feature of our APIs.
+    * <EM>Not</EM> invoking callbacks at the wrong time is just as important as calling them at the right time. For a typical use case, the callback and errback are mutually exclusive and invoked exactly once.
+    * Refactoring common code might be harder when using callbacks.
+    </OL>
+    We’ll have more to say about callbacks in future Parts, but for now this is enough to see why Twisted might have an abstraction devoted to managing them.
+    <H3>The Deferred
+    Since callbacks are used so much in asynchronous programming, and since using them correctly can, as we have discovered, be a bit tricky, the Twisted developers created an abstraction called a <CODE>Deferred</CODE> to make programming with callbacks easier. The <CODE>Deferred</CODE> class is defined in <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L132"><CODE>twisted.internet.defer</CODE></A>.
+    <P style="padding-left: 30px;">The word "deferred" is either a verb or an adjective in everyday English, so it might sound a little strange used as a noun. Just know that, from now on, when I use the phrase "the deferred" or "a deferred", I’m referring to an instance of the <CODE>Deferred</CODE> class. We’ll talk about why it is called <CODE>Deferred</CODE> in a future Part. It might help to mentally add the word "result" to each phrase, as in "the deferred result". As we will eventually see, that’s really what it is.
+    A deferred contains a pair of callback chains, one for normal results and one for errors. A newly-created deferred has two empty chains. We can populate the chains by adding callbacks and errbacks and then <EM>fire</EM> the deferred with either a normal result (here’s your poem!) or an exception (I couldn’t get the poem, and here’s why). Firing the deferred will invoke the appropriate callbacks or errbacks in the order they were added. Figure 12 illustrates a deferred instance with its callback/errback chains:<A name="figure12"></A>
+    <DIV id="attachment_1763" class="wp-caption aligncenter" style="width: 646px"><A href="./part7_files/deferred-1.png"><IMG class="size-full wp-image-1763" title="Figure 12: A Deferred" src="./part7_files/deferred-1.png" alt="Figure 12: A Deferred" width="636" height="325"></A><P class="wp-caption-text">Figure 12: A Deferred</DIV>
+    Let’s try this out. Since deferreds don’t use the reactor, we can test them out without starting up the loop.
+    <P style="padding-left: 30px;">You might have noticed a method on <CODE>Deferred</CODE> called <CODE>setTimeout</CODE> that does use the reactor. It is deprecated and will cease to exist in a future release. Pretend it’s not there and don’t use it.
+    Our first example is in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-1.py"><TT>twisted-deferred/defer-1.py</TT></A>:
+    from twisted.internet.defer import Deferred
+
+    def got_poem(res):
+        print 'Your poem is served:'
+        print res
+
+    def poem_failed(err):
+        print 'No poetry for you.'
+
+    d = Deferred()
+
+    # add a callback/errback pair to the chain
+    d.addCallbacks(got_poem, poem_failed)
+
+    # fire the chain with a normal result
+    d.callback('This poem is short.')
+
+    print "Finished"
+    This code makes a new deferred, adds a callback/errback pair with the <CODE>addCallbacks</CODE> method, and then fires the "normal result" chain with the <CODE>callback</CODE> method. Of course, it’s not much of a chain since it only has a single callback, but no matter. Run the code and it produces this output:
+    Your poem is served:
+    This poem is short.
+    Finished
+    That’s pretty simple. Here are some things to notice:
+    <OL>
+    * Just like the callback/errback pairs we used in client 3.1, the callbacks we add to this deferred each take one argument, either a normal result or an error result. It turns out that deferreds support callbacks and errbacks with multiple arguments, but they always have at least one, and the first argument is always either a normal result or an error result.
+    * We add callbacks and errbacks to the deferred in pairs.
+    * The <CODE>callback</CODE> method fires the deferred with a normal result, the method’s only argument.
+    * Looking at the order of the <CODE>print</CODE> output, we can see that firing the deferred invokes the callbacks immediately. There’s nothing asynchronous going on at all. There can’t be, since no reactor is running. It really boils down to an ordinary Python function call.
+    </OL>
+    Ok, let’s push the other button. The example in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-2.py"><TT>twisted-deferred/defer-2.py</TT></A> fires the deferred’s errback chain:
+    from twisted.internet.defer import Deferred
+    from twisted.python.failure import Failure
+
+    def got_poem(res):
+        print 'Your poem is served:'
+        print res
+
+    def poem_failed(err):
+        print 'No poetry for you.'
+
+    d = Deferred()
+
+    # add a callback/errback pair to the chain
+    d.addCallbacks(got_poem, poem_failed)
+
+    # fire the chain with an error result
+    d.errback(Failure(Exception('I have failed.')))
+
+    print "Finished"
+    And after running that script we get this output:
+    No poetry for you.
+    Finished
+    So firing the errback chain is just a matter of calling the <CODE>errback</CODE> method instead of the <CODE>callback</CODE> method, and the method argument is the error result. And just as with callbacks, the errbacks are invoked immediately upon firing.
+    In the previous example we are passing a <CODE>Failure</CODE> object to the <CODE>errback</CODE> method like we did in client 3.1. That’s just fine, but a deferred will turn ordinary <CODE>Exception</CODE>s into <CODE>Failure</CODE>s for us. We can see that with <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-3.py"><TT>twisted-deferred/defer-3.py</TT></A>:
+    from twisted.internet.defer import Deferred
+
+    def got_poem(res):
+        print 'Your poem is served:'
+        print res
+
+    def poem_failed(err):
+        print err.__class__
+        print err
+        print 'No poetry for you.'
+
+    d = Deferred()
+
+    # add a callback/errback pair to the chain
+    d.addCallbacks(got_poem, poem_failed)
+
+    # fire the chain with an error result
+    d.errback(Exception('I have failed.'))
+    Here we are passing a regular <CODE>Exception</CODE> to the <CODE>errback</CODE> method. In the errback, we are printing out the class and the error result itself. We get this output:
+    twisted.python.failure.Failure
+    [Failure instance: Traceback (failure with no frames): : I have failed.
+    ]
+    No poetry for you.
+    This means when we use deferreds we can go back to working with ordinary <CODE>Exception</CODE>s and the <CODE>Failure</CODE>s will get created for us automatically. A deferred will guarantee that each errback is invoked with an actual <CODE>Failure</CODE> instance.
+    We tried pressing the <CODE>callback</CODE> button and we tried pressing the <CODE>errback</CODE> button. Like any good engineer, you probably want to start pressing them over and over. To make the code shorter, we’ll use <CODE>lambda</CODE>s to add our callbacks. Check out <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-4.py"><TT>twisted-deferred/defer-4.py</TT></A>:
+    from twisted.internet.defer import Deferred
+    def out(s): print s
+    d = Deferred()
+    d.addCallbacks(lambda r: out(r), lambda e: out(e))
+    d.callback('First result')
+    d.callback('Second result')
+    print 'Finished'
+    Now we get this output:
+    First result
+    Traceback (most recent call last):
+      ...
+    twisted.internet.defer.AlreadyCalledError
+    This is interesting! A deferred will not let us fire the normal result callbacks a second time. In fact, a deferred cannot be fired a second time no matter what, as demonstrated by these examples:
+    <UL>
+    * <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-4.py"><TT>twisted-deferred/defer-4.py</TT></A>
+    * <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-5.py"><TT>twisted-deferred/defer-5.py</TT></A>
+    * <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-6.py"><TT>twisted-deferred/defer-6.py</TT></A>
+    * <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-7.py"><TT>twisted-deferred/defer-7.py</TT></A>
+    </UL>
+    Notice those final <CODE>print</CODE> statements are never called. The <CODE>callback</CODE> and <CODE>errback</CODE> methods are raising genuine <CODE>Exception</CODE>s to let us know we’ve already fired that deferred. Deferreds help us avoid one of the pitfalls we identified with callback programming. When we use a deferred to manage our callbacks, we simply can’t make the mistake of calling both the callback and the errback, or invoking the callback twenty-seven times. We can try, but the deferred will raise an exception right back at us, instead of passing our mistake onto the callbacks themselves.
+    Can deferreds help us to refactor asynchronous code? Consider the example in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-8.py"><TT>twisted-deferred/defer-8.py</TT></A>:
+    import sys
+
+    from twisted.internet.defer import Deferred
+
+    def got_poem(poem):
+        print poem
+        from twisted.internet import reactor
+        reactor.stop()
+
+    def poem_failed(err):
+        print &gt;&gt;sys.stderr, 'poem download failed'
+        print &gt;&gt;sys.stderr, 'I am terribly sorry'
+        print &gt;&gt;sys.stderr, 'try again later?'
+        from twisted.internet import reactor
+        reactor.stop()
+
+    d = Deferred()
+
+    d.addCallbacks(got_poem, poem_failed)
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(d.callback, 'Another short poem.')
+
+    reactor.run()
+    This is basically our original example above, with a little extra code to get the reactor going. Notice we are using <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L766"><CODE>callWhenRunning</CODE></A> to fire the deferred after the reactor starts up. We’re taking advantage of the fact that <CODE>callWhenRunning</CODE> accepts additional positional- and keyword-arguments to pass to the callback when it is run. Many Twisted APIs that register callbacks follow this same convention, including the APIs to add callbacks to deferreds.
+    Both the callback and the errback stop the reactor. Since deferreds support chains of callbacks and errbacks, we can refactor the common code into a second link in the chains, a technique illustrated in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-9.py"><TT>twisted-deferred/defer-9.py</TT></A>:
+    import sys
+
+    from twisted.internet.defer import Deferred
+
+    def got_poem(poem):
+        print poem
+
+    def poem_failed(err):
+        print &gt;&gt;sys.stderr, 'poem download failed'
+        print &gt;&gt;sys.stderr, 'I am terribly sorry'
+        print &gt;&gt;sys.stderr, 'try again later?'
+
+    def poem_done(_):
+        from twisted.internet import reactor
+        reactor.stop()
+
+    d = Deferred()
+
+    d.addCallbacks(got_poem, poem_failed)
+    d.addBoth(poem_done)
+
+    from twisted.internet import reactor
+
+    reactor.callWhenRunning(d.callback, 'Another short poem.')
+
+    reactor.run()
+    The <CODE>addBoth</CODE> method adds the same function to both the callback and errback chains. And we can refactor asynchronous code after all.
+    <P style="padding-left: 30px;"><STRONG>Note:</STRONG> there is a subtlety in the way this deferred would actually execute its errback chain. We’ll discuss it in a future Part, but keep in mind there is more to learn about deferreds.
+    <H3>Summary
+    In this Part we analyzed callback programming and identified some potential problems. We also saw how the <CODE>Deferred</CODE> class can help us out:
+    <OL>
+    * We can’t ignore errbacks, they are required for any asynchronous API. Deferreds have support for errbacks built in.
+    * Invoking callbacks multiple times will likely result in subtle, hard-to-debug problems. Deferreds can only be fired once, making them similar to the familiar semantics of <CODE>try</CODE>/<CODE>except</CODE> statements.
+    * Programming with plain callbacks can make refactoring tricky. With deferreds, we can refactor by adding links to the chain and moving code from one link to another.
+    </OL>
+    We’re not done with the story of deferreds, there are more details of their rationale and behavior to explore. But we’ve got enough to start using them in our poetry client, so we’ll do that in <A href="http://krondo.com/blog/?p=1778">Part 8</A>.
+    <H3>Suggested Exercises
+    <OL>
+    * The last example ignores the argument to <CODE>poem_done</CODE>. Print it out instead. Make <CODE>got_poem</CODE> return a value and see how that changes the argument to <CODE>poem_done</CODE>.
+    * Modify the last two deferred examples to fire the errback chains. Make sure to fire the errback with an <CODE>Exception</CODE>.
+    * Read the docstrings for the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L189"><CODE>addCallback</CODE></A> and <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L192"><CODE>addErrback</CODE></A> methods on <CODE>Deferred</CODE>.
+    </OL>

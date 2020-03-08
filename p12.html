@@ -1,0 +1,245 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート12: 詩の変換サーバー &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート13: Deferred と行こう" href="p13.html" />
+    <link rel="prev" title="パート11: 詩が提供されました" href="p11.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート12: 詩の変換サーバー</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p11.html">パート11: 詩が提供されました</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p13.html">パート13: Deferred と行こう</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="id1">
+<h1>パート12: 詩の変換サーバー<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id2">
+<h2>もうひとつのサーバ<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>Twisted を使ったサーバをひとつ実装してみましたので、もうひとつ作ってみましょう。
+その後で Deferreds についてもっと詳しく学習することにしましょう。</p>
+<p>“<a class="reference internal" href="p09.html"><span class="doc">パート9: Deferred 再入門</span></a>”と”<a class="reference internal" href="p10.html"><span class="doc">パート10: 変換された詩</span></a>”で、詩の変換エンジンを導入しました。
+ここまで実装してきた <cite>cummingsifier</cite> はとても単純で、失敗をシミュレートするために随意な例外を追加しました。
+しかし、変換エンジンが他のサーバで稼動していてネットワーク越しに「詩の変換サービス」を提供するものだと、失敗ははるかに現実的な問題となります。
+たとえば、変換サーバがダウンしている状態です。</p>
+<p>パート12では、詩の変換サーバの実装を続けていきます。
+次のパートでは、詩のクライアントが外部の変換サービスを使うようにして、その過程で Deferreds に関して新しいことをいくつか学んでいきましょう。</p>
+</div>
+<div class="section" id="id3">
+<h2>プロトコルの設計<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>ここまでは、クライアントとサーバのやり取りは厳密に片方向でした。
+サーバはクライアントに詩を送りますが、クライアントはサーバに何も送りません。
+しかし、変換サービスは双方向です。
+クライアントが詩をサーバに送ると、サーバは変換した詩を送り返します。
+よって、そのやり取りを処理するプロトコルを利用あるいは発明する必要があるでしょう。</p>
+<p>このタイミングで、サーバに複数種類の変換をサポートさせて、クライアントにどれを使うか選んでもらうようにしましょう。
+クライアントからは、変換を特定する名前と完全な詩のテキストという二種類の情報を送るようにします。
+サーバは、変換された詩のテキストと呼ぶことにする、単一の情報を返します。
+これで非常に単純な一種の遠隔手続き呼び出し (<a class="reference external" href="http://en.wikipedia.org/wiki/Remote_procedure_call">Remote Procedure Call</a>) ができました。</p>
+<p>Twisted は、この問題を解決するために利用できる複数のプロトコルをサポートしています。
+<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/web/xmlrpc.py">XML-RPC</a> と <a class="reference external" href="http://twistedmatrix.com/documents/current/core/howto/pb-intro.html">Perspective Broker</a> 、それから <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/amp.py">AMP</a> です。</p>
+<p>しかし、このように完全な機能を持ったプロトコルのいずれかでも導入すると、非常に遠回りになってしまいます。
+そこで代わりに、自分たちでちっぽけなプロトコルを使えるようにしてみましょう。
+クライアントに次の形式の文字列を送るようにさせます。かぎ括弧はありません。</p>
+<blockquote>
+<div><p>&lt;変換名&gt;.&lt;詩の文字列&gt;</p>
+</div></blockquote>
+<p>変換の名前とその後にピリオド、それから詩の全文を続けただけです。
+そうしたら <a class="reference external" href="http://en.wikipedia.org/wiki/Netstrings">netstring</a> 形式で全体をエンコードしましょう。
+サーバから変換された詩を送り返すのも <cite>netstrings</cite> とします。
+<cite>netstrings</cite> は長さに基づく符号化 (length-encoding) ですので、サーバが詩の完全な結果を送り返すのに失敗した場合をクライアントは検知できます
+(おそらく操作の途中にクラッシュした場合です)。
+もしも覚えているなら、元々の詩のプロトコルは詩を送受信するときに中断されたことを検知する部分に問題がありましたよね。</p>
+<p>プロトコルの設計はこの辺にしましょう。何らかの賞を狙ったものでもありませんから。とはいえ、私たちの目的にはこれで十分です。</p>
+</div>
+<div class="section" id="id4">
+<h2>コード<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>それでは変換サーバのコードに目を通してみましょう。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L1">twisted-server-1/tranformedpoetry.py</a> にあります。
+最初は <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L41">TransformService</a> を定義します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">TransformService</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">cummingsify</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">poem</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>今のところ変換サービスは <cite>cummingsify</cite> という変換を同名のメソッドで実装しているだけです。
+さらなるメソッドを追加することでアルゴリズムを追加できるでしょう。
+ここで注意しておくことがあります。
+変換サービスは、私たちが以前に定義したプロトコルの詳細からは完全に独立しています。
+サービスの実装からプロトコルの実装を分離することは Twisted を使うとよくあるパターンです。
+こうすることで、コードが重複せずに複数のプロトコルを使って同じサービスを提供することが簡単になります。、</p>
+<p>それでは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L67">protocol factory</a> を見ていきましょう (プロトコル自体はその後で)。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">TransformFactory</span><span class="p">(</span><span class="n">ServerFactory</span><span class="p">):</span>
+
+    <span class="n">protocol</span> <span class="o">=</span> <span class="n">TransformProtocol</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">service</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">service</span> <span class="o">=</span> <span class="n">service</span>
+
+    <span class="k">def</span> <span class="nf">transform</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xform_name</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="n">thunk</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s1">&#39;xform_</span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">xform_name</span><span class="p">,),</span> <span class="kc">None</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">thunk</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span> <span class="c1"># no such transform</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">thunk</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+        <span class="k">except</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span> <span class="c1"># transform failed</span>
+
+    <span class="k">def</span> <span class="nf">xform_cummingsify</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">service</span><span class="o">.</span><span class="n">cummingsify</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>このファクトリでは、接続元のクライアントに代わってプロトコルインスタンスが詩の変換を要求するために利用できる <code class="docutils literal notranslate"><span class="pre">transform</span></code> メソッドを提供します。
+もしも要求する変換が存在しない場合、あるいは変換に失敗した場合は <code class="docutils literal notranslate"><span class="pre">None</span></code> を返します。
+<code class="docutils literal notranslate"><span class="pre">TransformService</span></code> のように、プロトコルファクトリは接続レベルのプロトコルから独立していて、その詳細はプロトコルクラス自身に委譲されます。</p>
+<p>押さえておくべきことのひとつは、 <code class="docutils literal notranslate"><span class="pre">xform_</span></code> というプリフィックスの付いたメソッドを介さないとサービスにアクセスできないように制限している方法です。
+プリフィックス名は異なり、たいていはファクトリではないオブジェクトに存在しますが、Twisted のソースコード内で見かけるパターンです。
+クライアントコードがサービスオブジェクトの特定メソッドを実行するのを防ぐひとつの方法です。クライアントはあらゆる変換名を送れるからです。
+また、サービスオブジェクトによって提供される API へプロトコル特有の適合を実行する場所でもあります。</p>
+<p>それでは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L47">プロトコルの実装</a> をみてみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">TransformProtocol</span><span class="p">(</span><span class="n">NetstringReceiver</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">stringReceived</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s1">&#39;.&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">request</span><span class="p">:</span> <span class="c1"># bad request</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">loseConnection</span><span class="p">()</span>
+            <span class="k">return</span>
+
+        <span class="n">xform_name</span><span class="p">,</span> <span class="n">poem</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">xformRequestReceived</span><span class="p">(</span><span class="n">xform_name</span><span class="p">,</span> <span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">xformRequestReceived</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xform_name</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="n">new_poem</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">transform</span><span class="p">(</span><span class="n">xform_name</span><span class="p">,</span> <span class="n">poem</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">new_poem</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">sendString</span><span class="p">(</span><span class="n">new_poem</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">loseConnection</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>プロトコルの実装においては、 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py#L31">NetstringReceiver</a> プロトコルで Twisted が netstrings をサポートしている利点を活用します。
+基底クラスが netstrings のデコード (エンコードも) を処理してくれますので、私たちは <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py#L49">stringReceived</a> メソッドを実装するだけです。
+言い換えると、 <code class="docutils literal notranslate"><span class="pre">stringReceived</span></code> にはクライアントから送られてきた netstrings の <cite>content</cite> 部分を渡されます。
+netstrings エンコーディングによって付け足された余分なバイトは含みません。
+また、基底クラスは、完全な文字列をデコードするのに十分になるまで入力バイトをバッファリングしてくれます。</p>
+<p>もしもすべてが順調なら (そして、私たちが接続を閉じたばかりでなければ)、 <code class="docutils literal notranslate"><span class="pre">NetstringReceiver</span></code> が提供する <code class="docutils literal notranslate"><span class="pre">sendString</span></code> メソッド (最終的には <code class="docutils literal notranslate"><span class="pre">transport.write()</span></code> を呼び出します) を使って変換済みの詩をクライアントに送り返します。
+これが起こっていることの全てです。
+前回見たものと似ていますので、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/tranformedpoetry.py#L89">main</a> 関数を示して退屈させたりはしません。</p>
+<p><code class="docutils literal notranslate"><span class="pre">xformRequestReceived</span></code> メソッドを定義することによって、入力バイトストリームを抽象度の高い形式に変換する Twisted のパターンをつないでいる方法に注意してください。
+このメソッドには変換名と詩が別々の引数として渡されています。</p>
+</div>
+<div class="section" id="id6">
+<h2>簡単なクライアント<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>次のパートでは変換サービスのために Twisted のクライアントを実装しましょう。
+今のところは <cite>twisted-server-1/transform-test</cite> にある簡単なスクリプトを作るだけにしておきます。
+サーバに詩を送るために <code class="docutils literal notranslate"><span class="pre">netcat</span></code> プログラムを使い、レスポンスを表示する (netstrings でエンコードされているでしょう) だけです。
+次のようにして変換サーバを 11000 番ポートで動かしましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">tranformedpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">11000</span>
+</pre></div>
+</div>
+<p>このようにするとサーバに対してテストスクリプトを実行できます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">./</span><span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">transform</span><span class="o">-</span><span class="n">test</span> <span class="mi">11000</span>
+</pre></div>
+</div>
+<p>次のような出力が見えるでしょうか。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="mi">15</span><span class="p">:</span><span class="n">here</span> <span class="ow">is</span> <span class="n">my</span> <span class="n">poem</span><span class="p">,</span>
+</pre></div>
+</div>
+<p>netstring でエンコードされた詩になっていますね (元の詩は全て大文字でした)。</p>
+</div>
+<div class="section" id="id7">
+<h2>議論<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>このパートでいくつかの考え方を紹介しました。</p>
+<ol class="arabic simple">
+<li><p>双方向の通信。</p></li>
+<li><p>Twisted によって提供される既存のプロトコル実装の上に構築していくこと。</p></li>
+<li><p>機能のロジックとプロトコルのロジックを分離するためにサービスオブジェクトを使うこと。</p></li>
+</ol>
+<p>双方向通信の基本的な機構は単純です。
+ひとつ前のクライアントとサーバでデータを読み書きするときに同じテクニックを使っています。
+唯一の違いは両方ともで一緒に使ったことです。
+もちろん、もっと複雑なプロトコルではバイトストリームを処理して送信メッセージを整形するためにもっと複雑なコードになります。
+そしてこれこそが、先ほどやったように、既存のプロトコルの実装を使う大きな理由です。</p>
+<p>基本的なプロトコルを記述することがカンタンになってきたら、Twisted が提供する他のプロトコルの実装にも目を通してみるのは良い考えですね。
+<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py">twisted.protocols.basic</a> モジュールから始めるのが良いかもしれません。
+簡単なプロトコルを記述することは、Twisted のプログラミングスタイルに慣れる素晴らしい方法です。
+しかし現実のプログラムでは、プロトコルに使いたいと思うものがひとつはあると仮定して、今すぐ使える実装を使う方がよくあるでしょう。</p>
+<p>ここで紹介する最後の新しいアイデアは、機能とプロトコルの詳細を分離するためにサービスオブジェクトを使うことで、Twisted プログラミングでは本当に重要なデザインパターンです。
+このパートで作ったサービスオブジェクトはちっぽけなものですが、もっと現実的なネットワークサービスだと非常に複雑になると想像できますよね。
+そして、サービスをプロトコル層の詳細から独立させることにより、コードが重複することなく新しいプロトコル上で同じサービスを素早く提供できます。</p>
+<p>図27では、ふたつの異なるプロトコルを介して詩を変換する変換サーバを示します (上で示したサーバのバージョンではひとつのプロトコルだけです)。</p>
+<div class="figure align-default" id="id11">
+<span id="figure27"></span><img alt="_images/p12_server-21.png" src="_images/p12_server-21.png" />
+<p class="caption"><span class="caption-text">図２７：ふたつのプロトコルを持つ変換サーバ</span><a class="headerlink" href="#id11" title="Permalink to this image">¶</a></p>
+</div>
+<p>図27ではふたつの別々のプロトコルファクトリを必要としましたが、 <code class="docutils literal notranslate"><span class="pre">protocol</span></code> クラス属性が異なるだけでも、単に識別可能なだけでも構いません。
+ファクトリは同じサービスオブジェクトを共有し、 <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> 自体が異なる実装を要求するようにできます。
+これでコードが再利用可能になりましたね。</p>
+</div>
+<div class="section" id="id8">
+<h2>次は<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h2>
+<p>変換サーバに関してはこの辺で十分でしょう。
+“<a class="reference internal" href="p13.html"><span class="doc">パート13: Deferred と行こう</span></a>” では、クライアント自身で変換を実装する代わりに変換サーバを使うように詩のクライアントを更新しましょう。</p>
+</div>
+<div class="section" id="id9">
+<h2>おすすめの練習問題<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p><a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py#L31">NetstringReceiver</a> クラスのソースコードを読みましょう。
+クライアントが不正な netstring を送信すると何が起こるでしょうか？ クライアントが巨大な netstring を送信しようとしたときは？</p></li>
+<li><p>違う変換アルゴリズムを考えて、変換サービスとプロトコルファクトリに追加しましょう。
+netcat クライアントを修正してテストしてみてください。</p></li>
+<li><p>詩の変換を要求するプロトコルをもうひとつ考えて、サーバが両方のプロトコルを処理できるように修正しましょう (ふたつの異なるポート上です)。
+それぞれに対して <code class="docutils literal notranslate"><span class="pre">TransformService</span></code> の同じインスタンスを使います。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TransformService</span></code> のメソッドが非同期だったとすれば (つまり遅延オブジェクトを返します)、どのようにコードを修正しましょうか？</p></li>
+<li><p>変換サーバ用の同期クライアントを実装しましょう。</p></li>
+<li><p>詩を送信するときは netstrings を使うように元のクライアントとサーバを更新しましょう。</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p11.html">パート11: 詩が提供されました</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p13.html">パート13: Deferred と行こう</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,184 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート15: テストされた詩 &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート16: Twisted をデーモン化する" href="p16.html" />
+    <link rel="prev" title="パート14: Deferred が無かったら" href="p14.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート15: テストされた詩</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p14.html">パート14: Deferred が無かったら</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p16.html">パート16: Twisted をデーモン化する</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="id1">
+<h1>パート15: テストされた詩<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id2">
+<h2>はじめに<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>Twisted を探検するなかでたくさんのコードを書いてきましたが、これまではある重要なことを避けてきました。テストです。
+Python 標準の <a class="reference external" href="http://docs.python.org/library/unittest.html#module-unittest">unittest</a> パッケージのような同期フレームワークを使って
+非同期コードをテストできることを不思議に思うかもしれませんね。
+短期的な答えとしては、できません、となります。
+ここまでで分かったように、同期と非同期のコードを混在させることはできません。少なくとも普通は。</p>
+<p>幸いにも、Twisted は <a class="reference external" href="http://twistedmatrix.com/documents/current/core/howto/testing.html">trial</a>
+と呼ばれる独自のテストフレームワークを持っています。
+これは非同期コードのテストをサポートしています (同期のコードにも使えます) 。</p>
+<p>ここからはあなたが <a class="reference external" href="http://docs.python.org/library/unittest.html#module-unittest">unittest</a> や似たようなテストフレームワークの基本的な仕組みに慣れていると仮定します。
+特定の親クラス (<code class="docutils literal notranslate"><span class="pre">TestCase</span></code> のような名前です) を持つクラスを定義してテストを作成する方法です。
+“<cite>test</cite>” という単語から始まるそれぞれのメソッドがひとつのテストとみなされます。
+フレームワークが全てのテストを発見してくれて、オプションである <code class="docutils literal notranslate"><span class="pre">setUp</span></code> と <code class="docutils literal notranslate"><span class="pre">tearDown</span></code> ステップをはさみながら個別のテストを順番に実行してくれます。
+そして最後に結果を報告します。</p>
+</div>
+<div class="section" id="id4">
+<h2>例<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L1">tests/test_poetry.py</a> にいくつかのテスト例があります。
+すべてのテスト例が自己完結することを保証するために (<cite>PYTHONPATH</cite> の設定について心配する必要はありません)、必要なコードの全てをテストモジュールにコピーしておきました。
+もちろん、普通は、テストしたいモジュールをインポートすることになるでしょう。</p>
+<p>この例では、テストサーバから詩を取得するためにクライアントを使うことによって、詩のクライアントとサーバの両方をテストしています。
+テスト用に詩のサーバを提供するためには、テストケースにおいて <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L70">setUp</a> メソッドを実装します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryTestCase</span><span class="p">(</span><span class="n">TestCase</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">setUp</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">factory</span> <span class="o">=</span> <span class="n">PoetryServerFactory</span><span class="p">(</span><span class="n">TEST_POEM</span><span class="p">)</span>
+        <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">port</span> <span class="o">=</span> <span class="n">reactor</span><span class="o">.</span><span class="n">listenTCP</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">factory</span><span class="p">,</span> <span class="n">interface</span><span class="o">=</span><span class="s2">&quot;127.0.0.1&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">portnum</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="o">.</span><span class="n">getHost</span><span class="p">()</span><span class="o">.</span><span class="n">port</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">setUp</span></code> メソッドはテスト用の詩を与えて詩のサーバを生成し、ランダムな空いているポートで待ち受けます。
+もし必要なら、実際のテストが利用できるようにそのポート番号を使わないようにします。
+もちろん、テストが終わったら <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L76">tearDown</a> の中でテストサーバを安全に終了させます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">tearDown</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="n">port</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">port</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">port</span><span class="o">.</span><span class="n">stopListening</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>これで最初のテスト (<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L80">test_client</a>) ができます。
+ここでは、 テストサーバから詩を取得して期待した詩であるかを検証するために <cite>get_poetry</cite> を使います。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">test_client</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The correct poem is returned by get_poetry.&quot;&quot;&quot;</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">get_poetry</span><span class="p">(</span><span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">portnum</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">got_poem</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEquals</span><span class="p">(</span><span class="n">poem</span><span class="p">,</span> <span class="n">TEST_POEM</span><span class="p">)</span>
+
+    <span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">got_poem</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">d</span>
+</pre></div>
+</div>
+<p>ここでのテストは遅延オブジェクトを返すことに注意してください。
+<cite>trial</cite> を使う場合はそれぞれのテストメソッドはコールバックとして動作します。
+このことは、reactor が動いていてテストの一部として非同期操作を実行できることを意味します。
+テストが非同期であるとフレームワークに教えるだけでよく、いつもの Twisted のやりかたに沿うだけです。
+単に遅延オブジェクトを返すのです。</p>
+<p><cite>trial</cite> フレームワークは、 <code class="docutils literal notranslate"><span class="pre">tearDown</span></code> メソッドを呼び出す前に遅延オブジェクトが発火するのを待ちます。
+そして、遅延オブジェクトが失敗したらテストが失敗したものとします。
+(最後のコールバックとエラー用コールバックのペアが失敗したときです。)
+遅延オブジェクトが発火するまでにあまりに長時間が経過した場合もテストは失敗とみまします。デフォルトでは２分です。
+テストが終わったということは、遅延オブジェクトが発火されたことを意味しますので、コールバックも実行され、テストメソッドである <code class="docutils literal notranslate"><span class="pre">assertEquals</span></code> が実行されたわけです。</p>
+<p>ふたつ目のテストは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L91">test_failure</a> で、これは <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> がサーバに接続できなければ適切な方法で失敗することを検証します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">test_failure</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The correct failure is returned by get_poetry when</span>
+<span class="sd">    connecting to a port with no server.&quot;&quot;&quot;</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">get_poetry</span><span class="p">(</span><span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">assertFailure</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="ne">ConnectionRefusedError</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>ここでは、無効なポートに接続してみて、 <cite>trial</cite> が提供する <code class="docutils literal notranslate"><span class="pre">assertFailure</span></code> を使ってみることにします。
+このメソッドは <code class="docutils literal notranslate"><span class="pre">assertRaises</span></code> メソッドのようなものですが、非同期コード用です。
+ある例外を与えられたときに、ある遅延オブジェクトが失敗したら成功、そうでなければ失敗する遅延オブジェクトを返します。</p>
+<p><cite>trial</cite> スクリプトを使って、次のようにしてテストを動かすことができます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">trial</span> <span class="n">tests</span><span class="o">/</span><span class="n">test_poetry</span><span class="o">.</span><span class="n">py</span>
+</pre></div>
+</div>
+<p>それぞれのテストケースを表示しながら、いくつかの出力を確認できるでしょう。
+<cite>OK</cite> はテストが成功したことを意味します。</p>
+</div>
+<div class="section" id="id5">
+<h2>議論<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p><cite>trial</cite> は <cite>unittest</cite> にとてもよく似てますので、基本的な API を使ってテストを書き始めることがとても簡単です。
+テストが非同期のコードを使うなら遅延オブジェクトを返すだけで、残りは <cite>trial</cite> が良きようにやってくれます。
+必要であれば、 <code class="docutils literal notranslate"><span class="pre">setUp</span></code> と <code class="docutils literal notranslate"><span class="pre">tearDown</span></code> メソッドから遅延オブジェクトを返すこともできます。</p>
+<p>テストにおけるログメッセージは <cite>trial</cite> が自動的に作成する <code class="docutils literal notranslate"><span class="pre">_trial_temp</span></code> という名前のディレクトリの中のファイルに収集されるでしょう。
+画面に表示されるエラーに加えて、失敗したテストをデバッグする始めの一歩としてもログは役に立ちます。</p>
+<p>図33はテストが実行される様子を表しています。</p>
+<div class="figure align-default" id="id9">
+<span id="figure33"></span><img alt="_images/p15_test-1.png" src="_images/p15_test-1.png" />
+<p class="caption"><span class="caption-text">図33： <cite>trial</cite> テストが実行される様子</span><a class="headerlink" href="#id9" title="Permalink to this image">¶</a></p>
+</div>
+<p>以前に似たようなフレームワークを使ったことがあれば、テストに関係する全てのメソッドが遅延オブジェクトを返すかもしれないこと以外は見慣れたモデルでしょう。</p>
+<p><cite>trial</cite> フレームワークは、「非同期に処理が進むこと」がプログラム全体に渡って及ぼす変化をうまく表しています。
+テスト (もしくは関数でもメソッドでも) が非同期であるためには、次の条件を満たさなくてはなりません。</p>
+<ol class="arabic simple">
+<li><p>ブロックしません。そして普通は、</p></li>
+<li><p>遅延オブジェクトを返します。</p></li>
+</ol>
+<p>しかしこのことは、こうした関数を呼び出すものは全て、遅延オブジェクトを受け付ける準備ができていなければなりませんし、ブロックしてはいけない (それゆえに、遅延オブジェクトを返すことになるでしょう)、ということを意味します。
+これはどんどん進んでいきます。
+したがって、 遅延オブジェクトを返す非同期なテストを扱える <cite>trial</cite> のようなフレームワークが必要なのです。</p>
+</div>
+<div class="section" id="id6">
+<h2>まとめ<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>ユニットテストに関してはこんなところにしておきましょう。
+Twisted のコードにおいてユニットテストをどのように記述すべきかの例を探すことになったら、Twisted そのものを見るに越したことはありません。
+Twisted フレームワークには、毎回のリリース時に付け加えられている、非常に大規模なユニットテストがあります。
+これらのテストは、コードベースに受け入れられる前にコードレビューを通して Twisted の専門家によって精査されていますので、
+Twisted のコードを正しいやり方でテストする素晴らしい例となるでしょう。</p>
+<p>“<a class="reference internal" href="p16.html"><span class="doc">パート16: Twisted をデーモン化する</span></a>” では、詩のサーバをきちんとしたデーモンにするために Twisted のユーティリティを使うことにしましょう。</p>
+</div>
+<div class="section" id="id7">
+<h2>おすすめの練習問題<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>テストのひとつが失敗するように変更してみましょう。また、出力を確認するために <cite>trial</cite> をもう一度動かしてみてください。</p></li>
+<li><p>オンラインの <a class="reference external" href="http://twistedmatrix.com/documents/current/core/howto/testing.html">trial documentation</a> を読んでみましょう。</p></li>
+<li><p>この連載で作成してきた詩のサービスに対するテストを書いてみましょう。</p></li>
+<li><p>Twisted にある <a class="reference external" href="http://twistedmatrix.com/trac/browser/trunk/twisted/test">テストのいくつか</a> をのぞいてみましょう。</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p14.html">パート14: Deferred が無かったら</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p16.html">パート16: Twisted をデーモン化する</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

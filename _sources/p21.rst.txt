@@ -1,0 +1,500 @@
+================================================================
+パート21: おろそかにならないようにゆっくりと: Twisted と Haskell
+================================================================
+..
+    Part 21: Lazy is as Lazy Doesn't: Twisted and Haskell
+
+はじめに
+========
+..
+    Introduction
+
+前回は Twisted と Erlang_ が共通に持っているいくつかの考えに細心の注意を払いながら、それぞれを比べました。
+非同期 I/O と reactive プログラミングが Erlang ランライムとプロセスモデルの鍵となるコンポーネントですから、結局のところ、これは非常にシンプルです。
+
+..
+    In the last Part we compared Twisted with `Erlang <http://erlang.org/>`_, giving most of our attention to some ideas they have in common.
+    And that ended up being pretty simple, as asynchronous I/O and reactive programming are key components of the Erlang runtime and process model.
+
+今日はさらに本題を離れて Haskell_ に目を向けてみましょう。
+Erlang とは随分異なる (もちろん Python とも) もうひとつの関数型言語です。
+平行して存在するものは多くありませんが、非同期 I/O が隠蔽しているいくつかを覗いていくことになります。
+
+..
+    Today we are going to range further afield and look at `Haskell <http://haskell.org/>`_, another functional language that is nevertheless quite different from Erlang (and, of course, Python).
+    There won't be as many parallels, but we will nevertheless find some asynchronous I/O hiding under the covers.
+
+.. _Erlang: http://erlang.org/
+.. _Haskell: http://haskell.org/
+
+大文字 F の付いた関数
+=====================
+..
+    Functional with a Capital F
+
+Erlang も関数型言語ですが、信頼性の高い並行モデル - reliable concurrency model - に主眼が置かれています。
+一方で Haskell はどこまで行っても関数で、 `functors <http://en.wikipedia.org/wiki/Functor>`_ と `monads <http://en.wikipedia.org/wiki/Monad_%28category_theory%29>`_ のように圏論 (`category theory <http://en.wikipedia.org/wiki/Category_theory>`_) から持ち込んだ概念を平然と使えるようにします。
+
+..
+    Although Erlang is also a functional language, its main focus is a reliable concurrency model.
+    Haskell, on the other hand, is functional through and through, making unabashed use of concepts from `category theory <http://en.wikipedia.org/wiki/Category_theory>`_ like `functors <http://en.wikipedia.org/wiki/Functor>`_ and `monads <http://en.wikipedia.org/wiki/Monad_%28category_theory%29>`_.
+
+でも気にしないでください。こうした概念に深入りするつもりはありません (たとえ可能だとしても)。
+その代わり、Haskell のもっと伝統的な関数の機能のひとつ "laziness" に注目していきます。
+多くの関数型言語のように (しかし Erlang は違います)、Haskell は遅延評価 (`lazy evaluation <http://en.wikipedia.org/wiki/Lazy_evaluation>`_) をサポートします。
+評価が遅延される言語では、プログラムのソースコードは「何を計算するのか」に比べて「どうやって計算するのか」を多くは記述しません。
+一般的には、実際に計算を処理することの詳細はコンパイラとランタイムシステムの仕事になります。
+
+..
+    Don't worry, we're not going into any of that here (as if we could).
+    Instead we'll focus on one of Haskell's more traditionally functional features: laziness.
+    Like many functional languages (but unlike Erlang), Haskell supports `lazy evaluation <http://en.wikipedia.org/wiki/Lazy_evaluation>`_.
+    In a lazily evaluated language the text of a program doesn't so much describe how to compute something as what to compute.
+    The details of actually performing the computation are generally left to the compiler and runtime system.
+
+この点についてもう少し言及しておくと、遅延評価される計算が進みにつれて、ランタイムはすべてを一斉に実行するのではなく、部分的に (あるいは遅延させて) 文を評価するかもしれません。
+一般的に、ランタイムは現在の計算を進めるために必要とされる式だけを評価するでしょう。
+
+..
+    And, more to the point, as a lazily-evaluated computation proceeds the runtime may evaluate expressions only partially (lazily) instead of all at once.
+    In general, the runtime will evaluate only as much of an expression as is needed to make progress on the current computation.
+
+次の一行が ``[1,2,3]`` というリスト (Haskell と Python はいくつかのリスト構文が一緒です) に ``head`` 、リストの最初の要素を取り出す関数、を適用する簡単な Haskell 文です。
+::
+
+    head [1,2,3]
+
+..
+    Here is a simple Haskell statement applying ``head``, a function that retrieves the first element of a list, to the list ``[1,2,3]`` (Haskell and Python share some of their list syntax):
+    ::
+
+        head [1,2,3]
+
+`GHC <http://www.haskell.org/ghc/>`_ Haskell ランタイムをインストールすると、こんな感じで試すことができます。
+::
+
+    [~] ghci
+    GHCi, version 6.12.1: http://www.haskell.org/ghc/  : ? for help
+    Loading package ghc-prim ... linking ... done.
+    Loading package integer-gmp ... linking ... done.
+    Loading package base ... linking ... done.
+    Prelude> head [1,2,3]
+    1
+    Prelude>
+
+..
+    If you install the `GHC <http://www.haskell.org/ghc/>`_ Haskell runtime, you can try this out yourself:
+
+    ::
+
+        [~] ghci
+        GHCi, version 6.12.1: http://www.haskell.org/ghc/  : ? for help
+        Loading package ghc-prim ... linking ... done.
+        Loading package integer-gmp ... linking ... done.
+        Loading package base ... linking ... done.
+        Prelude> head [1,2,3]
+        1
+        Prelude>
+
+結果は予想したように数字の 1 です。
+Haskell のリスト構文には、いくつかの先頭要素からリストを定義する使いやすい機能があります。
+例えば ``[2,4 ..]`` というリストは 2 から始まる偶数の数列になります。
+どこで終わるのかって？うーん、終わりません。
+Haskell の ``[2,4 ..]`` などのリストは (概念的に) 無限リストを表現します。
+対話的な Haskell プロンプトでこれを評価してみると分かります。
+あなたが入力した式の結果を表示しようとしてくれるでしょう。
+::
+
+    Prelude> [2,4 ..]
+     [2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84,86,88,90,92,94,96,98,100,102,104,106,108,110,112,114,116,118,120,122,124,126,128,130,132,134,136,138,140,142,144,146,
+    ...
+
+..
+    The result is the number 1, as expected.
+    The Haskell list syntax includes the handy ability to define a list from its first couple of elements.
+    For example, the list ``[2,4 ..]`` is the sequence of even numbers starting with 2.
+    Where does it end? Well, it doesn't.
+    The Haskell list [2,4 ..] and others like it represent (conceptually) infinite lists.
+    You can see this if you try to evaluate one at the interactive Haskell prompt, which will attempt to print out the result of your expression:
+
+    ::
+
+    Prelude> [2,4 ..]
+    [2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84,86,88,90,92,94,96,98,100,102,104,106,108,110,112,114,116,118,120,122,124,126,128,130,132,134,136,138,140,142,144,146,
+    ...
+
+実際には終了しませんので、この計算を停止させるためには ``Ctrl-C`` を押さなければならないでしょう。
+しかし遅延評価のおかげで、Haskell ではこのような無限リストを何の問題もなく使用できます。
+::
+
+    Prelude> head [2,4 ..]
+    2
+    Prelude> head (tail [2,4 ..])
+    4
+    Prelude> head (tail (tail [2,4 ..]))
+    6
+
+..
+    You'll have to press ``Ctrl-C`` to stop that computation as it will never actually terminate.
+    But because of lazy evaluation, it is possible to use these infinite lists in Haskell with no trouble:
+
+    ::
+
+        Prelude> head [2,4 ..]
+        2
+        Prelude> head (tail [2,4 ..])
+        4
+        Prelude> head (tail (tail [2,4 ..]))
+        6
+
+無限リストの最初と二番目と三番目の要素にそれぞれアクセスしていますが、無限ループはどこにも見当たりませんね。
+これが遅延評価のエッセンスです。
+最初にリスト全体を評価して (こうすると無限ループになってしまいます) リストを ``head`` 関数に与えるのではなく、Haskell ランタイムは ``head`` がその処理を終えるのに十分な大きさのリストしか構築しません。
+リストの残りの部分は決して構築されません。計算を続けるために必要ないからです。
+
+..
+    Here we are accessing the first, second, and third elements of this infinite list respectively, with no infinite loop anywhere in sight.
+    This is the essence of lazy evaluation.
+    Instead of first evaluating the entire list (which would cause an infinite loop) and then giving that list to the ``head`` function, the Haskell runtime only constructs as much of the list as it needs for ``head`` to finish its work.
+    The rest of the list is never constructed at all, because it is not needed to proceed with the computation.
+
+``tail`` 関数を使ってみると、Haskell はリストをさらに構築させられます。しかしここでも、計算の次のステップを評価するために必要な分だけです。
+一度計算が終了すると、リストの後ろの部分は捨て去ることができます。
+
+..
+    When we bring the ``tail`` function into play, Haskell is forced to construct the list further, but again only as much as it needs to evaluate the next step of the computation.
+    And once the computation is done, the (unfinished) list can be discarded.
+
+みっつの異なる無限リストを部分的に消費する Haskell コードがあります。
+::
+
+    Prelude> let x = [1..]
+    Prelude> let y = [2,4 ..]
+    Prelude> let z = [3,6 ..]
+    Prelude> head (tail (tail (zip3 x y z)))
+    (3,6,9)
+
+..
+    Here's some Haskell code that partially consumes three different infinite lists:
+
+    ::
+
+    Prelude> let x = [1..]
+    Prelude> let y = [2,4 ..]
+    Prelude> let z = [3,6 ..]
+    Prelude> head (tail (tail (zip3 x y z)))
+    (3,6,9)
+
+ここでは、すべてのリストを一緒くたにまとめて、tail の tail の head を取得します。
+繰り返しになりますが、Haskell は問題なくこれを扱えますし、コードを評価し終えるために必要にしか各リストを構築しません。
+図46に Haskell ランタイムが無限リストを消費する - consuming - 様子を図示します。
+
+.. _figure46:
+
+.. figure:: images/p21_haskell.png
+
+    図46：無限リストを消費する Haskell
+
+..
+    Here we zip all the lists together, then grab the head of the tail of the tail.
+    Once again, Haskell has no trouble with this and only constructs as much of each list as it needs to finish evaluating our code.
+    We can visualize the Haskell runtime "consuming" these infinite lists in Figure 46:
+    <div id="attachment_2846" class="wp-caption aligncenter" style="width: 477px">` <./part21_files/haskell.png"><img class="size-full wp-image-2846" title="Figure 46: Haskell consuming some infinite lists" src="./part21_files/haskell.png" alt="Figure 46: Haskell consuming some infinite lists" width="467" height="177">`_<p class="wp-caption-text lwe-editable-pre">Figure 46: Haskell consuming some infinite lists</div>
+
+Haskell ランタイムを単純なループとして表現しましたが、複数のスレッドで実装されているかもしれません (Haskell の GHC バージョンを使っているならきっとそうです)。
+しかし注意すべき主要なポイントは、この図がいかに、ネットワークソケットからデータを受信するにつれてその部分部分を消費する reactor ループのように見えるかです。
+
+..
+    Although we've drawn the Haskell runtime as a simple loop, it might be implemented with multiple threads (and probably is if you are using the GHC version of Haskell).
+    But the main point to notice is how this figure looks like a reactor loop consuming bits of data as they come in on network sockets.
+
+非同期 I/O と reactor パターンを、遅延評価の非常に限定的な形式だと考えることもできます。
+非同期 I/O のモットーは「あなたが持っているデータと同じくらいのプロセスのみ持ちます」 [#motto1]_ です。
+そして遅延評価のモットーは「あなたが必要とするデータと同じくらいのプロセスのみ必要とします」 [#motto2]_ です。
+さらに、遅延評価される言語はこのモットーをほとんどどこにでも適応します。I/O という限られたスコープだけではありません。
+
+.. [#motto1] "Only process as much data as you have"
+.. [#motto2] "Only process as much data as you need"
+
+
+..
+    You can think of asynchronous I/O and the reactor pattern as a very limited form of lazy evaluation.
+    The asynchronous I/O motto is: "Only process as much data as you have".
+    And the lazy evaluation motto is: "Only process as much data as you need".
+    Furthermore, a lazily-evaluated language applies that motto almost everywhere, not just in the limited scope of I/O.
+
+しかし遅延評価される言語では、非同期 I/O を使えるようにすることは大きな課題ではないことがポイントです。
+コンパイラとランタイムは、データ構造を少しずつ処理するために設計されており、I/O ストリームの入力チャンクを遅延して処理することは当然のことです。
+このため Erlang ランタイムのように、Haskell ランタイムはソケット抽象化の一部として非同期 I/O を簡単に取り込めます。
+Haskell で詩のクライアントを実装してこのことを見ていきましょう。
+
+..
+    But the point is that, for a lazily-evaluated language, making use of asynchronous I/O is no big deal.
+    The compiler and runtime are already designed to process data structures bit by bit, so lazily processing the incoming chunks of an I/O stream is just par for the course.
+    And thus the Haskell runtime, like the Erlang runtime, simply incorporates asynchronous I/O as part of its socket abstractions.
+    And we can show that by implementing a poetry client in Haskell.
+
+Haskell での詩
+==============
+..
+    Haskell Poetry
+
+初めての Haskell による詩のクライアントは `haskell-client-1/get-poetry.hs <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs>`_ にあります。
+Erlang のときと同様に、一気に完成バージョンを扱い、もっと学びたくなったときのために、さらに読むべきものを紹介します。
+
+..
+    Our first Haskell poetry client is located in `haskell-client-1/get-poetry.hs <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs>`_.
+    As with Erlang, we're going to jump straight to a finished client, and then suggest further reading if you'd like to learn more.
+
+Haskell も軽量スレッドとプロセスをサポートします。Haskell にとっては Erlang のように中心的な役割ではありませんが。
+Haskell クライアントはダウンロードしたい詩のそれぞれに対してプロセスを生成します。
+ここでキーとなる関数は、軽量スレッド内でソケットに接続し `getPoetry <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L48>`_ 関数を開始する、 `runTask <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L64>`_ です。
+
+..
+    Haskell also supports light-weight threads or processes, though they aren't as central to Haskell as they are to Erlang, and our Haskell client creates one process for each poem we want to download.
+    The key function there is `runTask <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L64>`_ which connects to a socket and starts the `getPoetry <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L48>`_ function in a light-weight thread.
+
+このコードの中にたくさんの型宣言があることに気付いたでしょうか。
+Haskellは Python や Erlang とは違って静的型付けです。
+Haskell は明示的に宣言されていない型を自動的に推論します  (推論できない場合はエラーを報告します) ので、個別の変数に型を宣言しません。
+Haskell は副作用のあるコード (つまり、I/O を実行するコード) を純粋な関数からきれいに分離することを要求してきますから、たくさんの関数が ``IO`` 型 (専門的にはモナドと言います) を含みます。
+
+..
+    You'll notice a lot of type declarations in this code.
+    Haskell, unlike Python or Erlang, is statically typed.
+    We don't declare types for each and every variable because Haskell will automatically infer types not explicitly declared (or report an error if it can't).
+    A number of the functions include the ``IO`` type (technically a monad) because Haskell requires us to cleanly separate code with side-effects (i.e., code that performs I/O) from pure functions.
+
+``getPoetry`` 関数には次の行があります。
+::
+
+    poem <- hGetContents h
+
+..
+    The ``getPoetry`` function includes this line:
+
+    ::
+
+        poem <- hGetContents h
+
+これは、ハンドル (つまり TCP ソケット) から詩の全体を読み込むために一度だけ出現します。
+しかし、普通は Haskell は遅延 - lazy - させます。
+Haskell ランタイムは、 ``select`` ループ内で非同期 I/O を処理する、ひとつ以上の実際のスレッドを持ちます。
+このため、I/O ストリームの遅延評価の可能性を保存しておきます。
+
+..
+    which appears to be reading the entire poem from the handle (i.e., the TCP socket) at once.
+    But Haskell, as usual, is lazy.
+    And the Haskell runtime includes one or more actual threads which perform asynchronous I/O in a ``select`` loop, thus preserving the possibilities for lazy evaluation of I/O streams.
+
+この非同期 I/O が本当に続いていくことを見せるために、詩のそれぞれの行におけるタスク情報を出力する "callback" 関数 -
+`gotLine <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L60>`_ -
+を含めておきました。
+しかし実のところコールバック関数ではありませんし、これを含めるか否かに関わらずプログラムは非同期 I/O を使うでしょう。
+この呼び出しでさえ、 "gotLine" は、Haskell プログラムでは問題外である命令法の言語 - imperative-language - の考え方を反映します。
+何はともあれ後でもう少し整理するとして、初めての Haskell クライアントを動かしましょうか。
+まずはゆっくりした詩のサーバ (slow poetry servers) をいくつか起動します。
+::
+
+    python blocking-server/slowpoetry.py --port 10001 poetry/fascination.txt
+    python blocking-server/slowpoetry.py --port 10002 poetry/science.txt
+    python blocking-server/slowpoetry.py --port 10003 poetry/ecstasy.txt --num-bytes 30
+
+..
+    Just to illustrate that asynchronous I/O is really going on, we have included a "callback" function, `gotLine <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-1/get-poetry.hs#L60>`_, that prints out some task information for each line in the poem.
+    But it's not really a callback function at all, and the program would use asynchronous I/O whether we included it or not.
+    Even calling it "gotLine" reflects an imperative-language mindset that is out of place in a Haskell program.
+    No matter, we'll clean it up in a bit, but let's take our first Haskell client out for a spin.
+    Start up some slow poetry servers:
+
+    ::
+
+    python blocking-server/slowpoetry.py --port 10001 poetry/fascination.txt
+    python blocking-server/slowpoetry.py --port 10002 poetry/science.txt
+    python blocking-server/slowpoetry.py --port 10003 poetry/ecstasy.txt --num-bytes 30
+
+それでは Haskell クライアントをコンパイルしましょう。
+::
+
+    cd haskell-client-1/
+    ghc --make get-poetry.hs
+
+..
+    Now compile the Haskell client:
+    ::
+
+    cd haskell-client-1/
+    ghc --make get-poetry.hs
+
+``get-poetry`` という名前のバイナリファイルが生成されますので、
+ようやくサーバに対してクライアントを実行できます。
+::
+
+    ./get-poetry 10001 10002 1000
+
+..
+    This will create a binary called ``get-poetry``.
+    Finally, run the client against our servers:
+    ::
+
+        ./get-poetry 10001 10002 1000
+
+次のような出力になります。
+::
+
+    Task 3: got 12 bytes of poetry from localhost:10003
+    Task 3: got 1 bytes of poetry from localhost:10003
+    Task 3: got 30 bytes of poetry from localhost:10003
+    Task 2: got 20 bytes of poetry from localhost:10002
+    Task 3: got 44 bytes of poetry from localhost:10003
+    Task 2: got 1 bytes of poetry from localhost:10002
+    Task 3: got 29 bytes of poetry from localhost:10003
+    Task 1: got 36 bytes of poetry from localhost:10001
+    Task 1: got 1 bytes of poetry from localhost:10001
+    ...
+
+..
+    And you should see some output like this:
+    ::
+
+    Task 3: got 12 bytes of poetry from localhost:10003
+    Task 3: got 1 bytes of poetry from localhost:10003
+    Task 3: got 30 bytes of poetry from localhost:10003
+    Task 2: got 20 bytes of poetry from localhost:10002
+    Task 3: got 44 bytes of poetry from localhost:10003
+    Task 2: got 1 bytes of poetry from localhost:10002
+    Task 3: got 29 bytes of poetry from localhost:10003
+    Task 1: got 36 bytes of poetry from localhost:10001
+    Task 1: got 1 bytes of poetry from localhost:10001
+    ...
+
+データの任意の大きさの塊ではなく、詩の各行に対して一行ずつ出力していますので、以前の非同期クライアントとは出力がちょっと違いますね。
+しかしお分かりのように、クライアントはひとつずつ順番にではなく、全てのサーバからのデータを一緒に処理しています。
+クライアントは他の詩を待つことなく、最初の詩を受信するとすぐに出力することにも気付いたでしょうか。
+他の詩の受信はそれぞれのペースで進みます。
+
+..
+    The output is slightly different than previous asynchronous clients because we are printing one line for each line of poetry instead of each arbitrary chunk of data.
+    But, as you can see, the client is clearly processing data from all the servers together, instead of one after the other.
+    You'll also notice that the client prints out the first poem as soon as it's finished, without waiting for the others, which continue on at their own pace.
+
+よし、クライアントから命令法の残り部分をキレイにして、タスク番号を気にせず、単に詩を受け取るだけのバージョンにしましょう。
+`haskell-client-2/get-poetry.hs <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-2/get-poetry.hs>`_ がそれです。
+非常に短くなっており、それぞれのサーバに対して、ソケットに接続してデータを受け取って送り返すだけですね。
+
+..
+    Alright, let's clean the remaining bits of imperative cruft from our client and present a version which just grabs the poetry without bothering with task numbers. 
+    You can find it in `haskell-client-2/get-poetry.hs <https://github.com/jdavisp3/twisted-intro/blob/master/haskell-client-2/get-poetry.hs>`_.
+    Notice that it's much shorter and, for each server, just connects to the socket, grabs all the data, and sends it back.
+
+新しいクライアントをコンパイルしましょう。
+::
+
+    cd haskell-client-2/
+    ghc --make get-poetry.hs
+
+
+..
+    Ok, let's compile a new client:
+    ::
+
+    cd haskell-client-2/
+    ghc --make get-poetry.hs
+
+詩のサーバの同じ集合に対して実行します。
+::
+
+    ./get-poetry 10001 10002 10003
+
+..
+    And run it against the same set of poetry servers:
+    ::
+
+    ./get-poetry 10001 10002 10003
+
+それぞれの詩のテキストが画面に時折表示されるでしょう。
+
+..
+    And you should see the text of each poem appear, eventually, on the screen.
+
+サーバの出力から、それぞれのサーバが同時にデータをクライアントに送っていることが分かるでしょう。
+それに加えて、クライアントはできるだけ早く最初の詩の各行を出力します。
+他の二つの詩に対して動作している最中でも、詩の残りの部分を待つことはありません。
+一つ目が終わると二つ目の詩を素早く出力します。これはずっと蓄積されてきたものです。
+
+..
+    You will notice from the server output that each server is sending data to the client simultaneously.
+    What's more, the client prints out each line of the first poem as soon as possible, without waiting for the rest of the poem, even while it's working on the other two.
+    And then it quickly prints out the second poem, which it has been accumulating all along.
+
+私たちが取り立てて何か命令しなくても、これらのすべてが起こります。
+コールバックも、あちこちに受け渡されるメッセージもありません。プログラムにやって欲しいことの正確な詳細があるだけです。
+実行するためにどうすべきかはこれっぽっちもありませんよね。
+残りは Haskell コンパイラとランタイムが面倒をみてくれます。やったね。
+
+..
+    And all of that happens without us having to do much of anything.
+    There are no callbacks, no messages being passed back and forth, just a concise description of what we want the program to do, and very little in the way of how it should go about doing it.
+    The rest is taken care of by the Haskell compiler and runtime. Nifty.
+
+議論、さらに読むべきもの
+========================
+..
+    Discussion and Further Reading
+
+Twisted から Erlang、そして Haskell へと移ってくる中で、見える部分から見えない部分まで、非同期プログラミングの背後にある考え方でこれらに平行して存在するムーブメントを確認できました。
+Twisted では、非同期プログラミングこそがその存在の中心的な動機です。
+フレームワークとしての Twisted の実装は Python とは分離されており (Python には軽量スレッドのようなコアとなる非同期の抽象化が欠けています)、Twisted を使ってプログラムを書くときは非同期モデルが前面に押し出されるか中心に居座ります。
+
+..
+    In moving from Twisted to Erlang to Haskell we can see a parallel movement, from the foreground to the background, of the ideas behind asynchronous programming.
+    In Twisted, asynchronous programming is the central motivating idea behind Twisted's existence.
+    And Twisted's implementation as a framework separate from Python (and Python's lack of core asynchronous abstractions like lightweight threads) keeps the asynchronous model front and center when you write programs using Twisted.
+
+Erlang では, 非同期という考え方は依然としてプログラマに見えますが、その詳細は言語とランタイムシステムの組織の一部であり, 同期プロセス同士で非同期メッセージが交換されるように抽象化されます。
+
+..
+    In Erlang, asynchronicity is still very visible to the programmer, but the details are now part of the fabric of the language and runtime system, enabling an abstraction in which asynchronous messages are exchanged between synchronous processes.
+
+そして最後に Haskell では、非同期 I/O はランタイム内部のもうひとつのテクニックにすぎません。
+プログラマからは広範に隠蔽され、Haskell の中心となる考え方のひとつである遅延評価を提供します。
+
+..
+    And finally, in Haskell, asynchronous I/O is just another technique inside the runtime, largely unseen by the programmer, for providing the lazy evaluation that is one of Haskell's central ideas.
+
+この状況に対する何らかの深い洞察を持っているわけではありません。
+多くのそして興味深い非同期モデルが現れる部分と、それを表現できるたくさんの異なる方法を指摘しているだけです。
+
+..
+    We don't have any profound insight into this situation, we're just pointing out the many and interesting places where the asynchronous model shows up, and the many different ways it can be expressed.
+
+Haskell についてここまで述べたことがあなたの興味をそそるなら、さらに学び続けるには `Real World Haskell <http://www.amazon.com/exec/obidos/ASIN/0596514980/krondonet-20>`_ がお勧めです。
+この本はプログラム言語の良い入門書がいかにあるべきかのモデルとも言えます。
+あと、私は読んでいませんが、 `Learn You a Haskell <http://learnyouahaskell.com/>`_ が良いとの話を聞いたことがあります。
+
+..
+    And if any of this has piqued your interest in Haskell, then we can recommend `Real World Haskell <http://www.amazon.com/exec/obidos/ASIN/0596514980/krondonet-20>`_ to continue your studies.
+    The book is a model of what a good language introduction should be.
+    And while I haven't read it, I've heard good things about `Learn You a Haskell <http://learnyouahaskell.com/>`_.
+
+Twisted 以外の非同期システムの探検と、このシリーズの最後から２番目のパートもこれでお終いです。
+":doc:`p22`"が最後です。もっと Twisted について学んでいく方法を紹介しましょう。
+
+..
+    This brings us to the end of our tour of asynchronous systems outside of Twisted, and the penultimate part in our series.
+    In `Part 22 <http://krondo.com/blog/?p=2874>`_ we will conclude, and suggest ways to learn more about Twisted.
+
+おすすめの練習問題
+------------------
+..
+    Suggested Exercises for the Startlingly Motivated
+
+1. Twisted と Erlang と Haskell のクライアントをそれぞれ比べてください。
+2. 詩のサーバに接続するときの失敗を扱えるように Haskell クライアントを修正しましょう。
+   ダウンロードできる全ての詩を取得し、ダウンロードできない詩のために妥当なエラーメッセージを出力させます。
+3. Twisted を使って作った詩のサーバの、Haskell バージョンを書いてみましょう。
+
+..
+    * Compare the Twisted, Erlang, and Haskell clients with each other.
+    * Modify the Haskell clients to handle failures to connect to a poetry server so they download all the poetry they can and output reasonable error messages for the poems they can't.
+    * Write Haskell versions of the poetry servers we made with Twisted.

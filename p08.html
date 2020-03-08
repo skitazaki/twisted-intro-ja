@@ -1,0 +1,223 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート8: Deferred で詩を &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート9: Deferred 再入門" href="p09.html" />
+    <link rel="prev" title="パート7: Deferred 入門" href="p07.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート8: Deferred で詩を</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p07.html">パート7: Deferred 入門</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p09.html">パート9: Deferred 再入門</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="deferred">
+<h1>パート8: Deferred で詩を<a class="headerlink" href="#deferred" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id1">
+<h2>クライアント 4.0<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>遅延オブジェクトに関することを学びましたので、これを使って Twisted の詩のクライアントを書き直してみましょう。クライアント 4.0 は <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py">twisted-client-4/get-poetry.py</a> にあります。</p>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L83">get_poetry</a> 関数は <code class="docutils literal notranslate"><span class="pre">callback</span></code> 引数も <code class="docutils literal notranslate"><span class="pre">errback</span></code> 引数も必要とはしません。代わりに、必要があればユーザーが複数のコールバックおよびエラー用コールバックを付け足せるように、新しい遅延オブジェクトを返します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">get_poetry</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Download a poem from the given host and port. This function</span>
+<span class="sd">    returns a Deferred which will be fired with the complete text of</span>
+<span class="sd">    the poem or a Failure if the poem could not be downloaded.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+    <span class="n">factory</span> <span class="o">=</span> <span class="n">PoetryClientFactory</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+    <span class="n">reactor</span><span class="o">.</span><span class="n">connectTCP</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">,</span> <span class="n">factory</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">d</span>
+</pre></div>
+</div>
+<p>新しい <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L65">factory</a> オブジェクトは <code class="docutils literal notranslate"><span class="pre">callback</span></code>/<code class="docutils literal notranslate"><span class="pre">errback</span></code> のペアではなく遅延オブジェクトを伴って初期化されます。詩を受信するか、サーバーに接続できないことが判明すると、遅延オブジェクトは詩か <code class="docutils literal notranslate"><span class="pre">failure</span></code> を渡してコールバック・チェーンを開始させます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryClientFactory</span><span class="p">(</span><span class="n">ClientFactory</span><span class="p">):</span>
+
+    <span class="n">protocol</span> <span class="o">=</span> <span class="n">PoetryProtocol</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">deferred</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="o">=</span> <span class="n">deferred</span>
+
+    <span class="k">def</span> <span class="nf">poem_finished</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">d</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span><span class="p">,</span> <span class="kc">None</span>
+            <span class="n">d</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">clientConnectionFailed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">connector</span><span class="p">,</span> <span class="n">reason</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">d</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span><span class="p">,</span> <span class="kc">None</span>
+            <span class="n">d</span><span class="o">.</span><span class="n">errback</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>遅延オブジェクトが使われた後にそれへの参照を開放する方法に注意してください。Twisted のソースコードではよく見られるパターンで、同じ遅延オブジェクトを繰り返し作動させないようにします。Python のガベージ・コレクターにも分かりやすい方法です。</p>
+<p>繰り返しになりますが、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L51">PoetryProtocol</a> を変更する必要はありません。そのままで十分です。残る作業は <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L96">poetry_main</a> 関数を更新するだけです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">poetry_main</span><span class="p">():</span>
+    <span class="n">addresses</span> <span class="o">=</span> <span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+    <span class="n">poems</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">errors</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">def</span> <span class="nf">got_poem</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+        <span class="n">poems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">poem_failed</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+        <span class="nb">print</span> <span class="o">&gt;&gt;</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="s1">&#39;Poem failed:&#39;</span><span class="p">,</span> <span class="n">err</span>
+        <span class="n">errors</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">err</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">poem_done</span><span class="p">(</span><span class="n">_</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">poems</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">errors</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">addresses</span><span class="p">):</span>
+            <span class="n">reactor</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="n">address</span> <span class="ow">in</span> <span class="n">addresses</span><span class="p">:</span>
+        <span class="n">host</span><span class="p">,</span> <span class="n">port</span> <span class="o">=</span> <span class="n">address</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">get_poetry</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">got_poem</span><span class="p">,</span> <span class="n">poem_failed</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addBoth</span><span class="p">(</span><span class="n">poem_done</span><span class="p">)</span>
+
+    <span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="n">poem</span> <span class="ow">in</span> <span class="n">poems</span><span class="p">:</span>
+        <span class="nb">print</span> <span class="n">poem</span>
+</pre></div>
+</div>
+<p>最初のコールバックとエラー用コールバックから <code class="docutils literal notranslate"><span class="pre">poem_done</span></code> の呼び出しを取り除くようにリファクタリングできるように、遅延オブジェクトのチェーン化する機能を活用している方法に注目してください。</p>
+<p>Twisted のコードでは遅延オブジェクトはとてもたくさん使われますので、現在扱っている遅延オブジェクトを保持するためには一文字の局所変数 <code class="docutils literal notranslate"><span class="pre">d</span></code> を使う、という慣習があります。オブジェクトの属性のように、より長い期間保持するときは “<code class="docutils literal notranslate"><span class="pre">deferred</span></code>” という名前もよく使われます。</p>
+</div>
+<div class="section" id="id2">
+<h2>議論<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>新しいクライアントを使うと、非同期版の <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> は同期版と同じだけの情報を受け付けます。詩のサーバのアドレスだけでよいのです。非同期版は遅延オブジェクトを返しますが、同期版は詩を返します。遅延オブジェクトを返すことは、Twisted の非同期 API と Twisted を使って書かれたプログラムの典型例であり、遅延オブジェクトの概念を明確にするためのもう一つの方法と言えます。</p>
+<blockquote>
+<div><p>遅延オブジェクトは「非同期な結果」もしくは「まだ得られていない結果」を表します。</p>
+</div></blockquote>
+<p>図１３でこの二つのプログラミングスタイルを対比させてみます。</p>
+<div class="figure align-default" id="id6">
+<span id="figure13"></span><img alt="_images/p08_sync-async.png" src="_images/p08_sync-async.png" />
+<p class="caption"><span class="caption-text">図１３：同期と非同期</span><a class="headerlink" href="#id6" title="Permalink to this image">¶</a></p>
+</div>
+<p>遅延オブジェクトを返すことによって、非同期 API は次のメッセージをユーザーに与えます。</p>
+<blockquote>
+<div><p>自分は非同期な関数です。
+私にやって欲しいことが何であれ終わってないかもしれません。
+しかし、完了すると、その結果とともに遅延オブジェクトのコールバック・チェーンを開始させます。
+一方で、何かおかしなことが起こったらエラー用コールバックのチェーンを開始させます。</p>
+</div></blockquote>
+<p>その関数自身が遅延オブジェクトを開始させるわけではありませんが、そのための遅延オブジェクトは既に返されているのです。むしろ、関数はイベントのチェーンをいつでも開始できる状態に設定したのです。</p>
+<p>遅延オブジェクトは、非同期モデルに必要なモノを用立てるために関数の結果の「時間をずらす (訳注：time-shifting)」方法です。関数によって返される遅延オブジェクトは、その関数が非同期であるという注意であり、来るべき結果の具体化されたものであり、その結果がいつかはもたらされるという約束になります。</p>
+<blockquote>
+<div><p>同期関数が遅延オブジェクトを返すことも可能です。技術的には、遅延された戻り値はその関数が潜在的には非同期であることを意味します。先々のパートでは、同期関数が遅延オブジェクトを返す例を目にするでしょう。</p>
+</div></blockquote>
+<p>遅延オブジェクトの振る舞いはきちんと定義されており、よく知られています (Twisted での経験深いプログラマにとっては) ので、あなた自身の API が遅延オブジェクトを返すようにすると、他の Twisted プログラマがあなたのコードを理解して使うことが簡単になるでしょう。遅延オブジェクトがなかったとしたら、それぞれの Twisted プログラマ、もしくは全ての Twisted の内部コンポーネントは、コールバックを管理するために独自の方法を持つことになっていたでしょう。その方法は、それを利用するためにはあなたが学ばなくてはいけなかったものです。</p>
+</div>
+<div class="section" id="reactor">
+<h2>遅延オブジェクトを使っていれば、あなたはコールバックを使いますし、それらは reactor に呼ばれます<a class="headerlink" href="#reactor" title="Permalink to this headline">¶</a></h2>
+<p>初めて Twisted を学ぶときによくある間違いとして、遅延オブジェクトにそれが持つ以上の機能を割り当てる、ということが挙げられます。特に、遅延オブジェクトのコールバック・チェーンに関数を追加したら、それは自動的に非同期になる、とよく誤解されます。たとえば、 <code class="docutils literal notranslate"><span class="pre">addCallback</span></code> で遅延オブジェクトを付け足すことで Twisted と一緒に <code class="docutils literal notranslate"><span class="pre">os.system</span></code> を使えるんじゃないか、といった具合にです。</p>
+<p>この間違いは最初に非同期モデルを学ぶことなく Twisted を学ぼうとすることに起因する問題だと私は思っています。典型的な Twisted のコードはたくさんの遅延オブジェクトを使い、ごくたまにしか reactor を参照しませんので、遅延オブジェクトがすべてを行っているかのように思えてしまいます。あなたがこのイントロダクションを最初から読んでくれているなら、そんな状況はほど遠いのではないでしょうか。Twisted は一緒に動作する多くの部分から構成されますが、非同期モデルを実装する一番の責任は reactor にあります。遅延オブジェクトは便利な抽象化ですが、理由が何であれそれらを使わずに Twisted を使ったクライアントのいくつかのバージョンを書いてきました。</p>
+<p>最初のコールバックが呼び出されたときにスタックトレースを見てみましょう。詩のサーバが動いているアドレスを指定して <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry-stack.py">twisted-client-4/get-poetry-stack.py</a> にあるサンプルプログラムを実行してみてください。以下のような出力になるでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">File</span> <span class="s2">&quot;twisted-client-4/get-poetry-stack.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">129</span><span class="p">,</span> <span class="ow">in</span>
+    <span class="n">poetry_main</span><span class="p">()</span>
+  <span class="n">File</span> <span class="s2">&quot;twisted-client-4/get-poetry-stack.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">122</span><span class="p">,</span> <span class="ow">in</span> <span class="n">poetry_main</span>
+    <span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+
+  <span class="o">...</span> <span class="c1"># some more Twisted function calls</span>
+
+    <span class="n">protocol</span><span class="o">.</span><span class="n">connectionLost</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span>
+  <span class="n">File</span> <span class="s2">&quot;twisted-client-4/get-poetry-stack.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">59</span><span class="p">,</span> <span class="ow">in</span> <span class="n">connectionLost</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">poemReceived</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">poem</span><span class="p">)</span>
+  <span class="n">File</span> <span class="s2">&quot;twisted-client-4/get-poetry-stack.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">62</span><span class="p">,</span> <span class="ow">in</span> <span class="n">poemReceived</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">poem_finished</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+  <span class="n">File</span> <span class="s2">&quot;twisted-client-4/get-poetry-stack.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">75</span><span class="p">,</span> <span class="ow">in</span> <span class="n">poem_finished</span>
+    <span class="n">d</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span> <span class="c1"># here&#39;s where we fire the deferred</span>
+
+  <span class="o">...</span> <span class="c1"># some more methods on Deferreds</span>
+
+  <span class="n">File</span> <span class="s2">&quot;twisted-client-4/get-poetry-stack.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">105</span><span class="p">,</span> <span class="ow">in</span> <span class="n">got_poem</span>
+    <span class="n">traceback</span><span class="o">.</span><span class="n">print_stack</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>クライアント 2.0 によって生成されたスタックトレースにそっくりですね。トレースの様子を図示すると図１４のようになります。</p>
+<div class="figure align-default" id="id7">
+<span id="figure14"></span><img alt="_images/p08_reactor-deferred-callback.png" src="_images/p08_reactor-deferred-callback.png" />
+<p class="caption"><span class="caption-text">図１４：遅延オブジェクトを持つコールバック</span><a class="headerlink" href="#id7" title="Permalink to this image">¶</a></p>
+</div>
+<p>ひとつ前の Twisted クライアントに似ています。図で表現してみるといくらか不穏に感じ始めるかもしれませんが。残念ながらこれ以上のことは見せられません。ある欠点が図に反映されていません。遅延オブジェクト内で二つ目のコールバックが呼び出されるまで、上記のコールバック・チェーンは reactor に制御を返しません。これは最初のコールバック (<code class="docutils literal notranslate"><span class="pre">got_poem</span></code>) が値を返した後に起こることです。</p>
+<blockquote>
+<div><p>新しいスタックトレースにはもうひとつの違いがあります。 “私たちのコード”  と “Twisted のコード” を分けている行はいくらか曖昧です。
+遅延オブジェクトにおけるメソッドは真に Twisted のコードだからです。
+コールバック・チェーン内で Twisted のコードとユーザのコードが混ぜこぜになることは、大規模な Twisted プログラムではよくあることです。
+これで他の Twisted による抽象化を広範囲に渡って使用できます。</p>
+</div></blockquote>
+<p>遅延オブジェクトを使うことで、コールバック・チェーンにおいて Twisted で reactor を開始させるいくつかのステップを追加しました。しかし、非同期モデルの基本的な機構は変更していません。コールバックを使うプログラミングに関するこれらの事実を思い出してください。</p>
+<ol class="arabic simple">
+<li><p>一度にひとつのコールバックしか動きません</p></li>
+<li><p>reactor が動いているときは、私たちのコールバックは動いていません</p></li>
+<li><p>逆もまた然りです</p></li>
+<li><p>コールバックがブロックしてしまったら、プログラム全体がブロックしてしまいます</p></li>
+</ol>
+<p>どのような方法であれ、コールバックを遅延オブジェクトに追加してもこれらの事柄を変更しません。特に、ブロックしてしまうコールバックは遅延オブジェクトに紐づいても依然としてブロックします。このため、遅延オブジェクトが実行されたとき (<code class="docutils literal notranslate"><span class="pre">d.callback</span></code>) にブロックしてしてしまい、Twisted がブロックしてしまうことになります。次のように結論付けられます。</p>
+<blockquote>
+<div><p>遅延オブジェクトはコールバックを管理する問題に対する解決策です (Twisted の開発者が編み出した方法です)。
+コールバックを避ける方法でもありませんし、ブロックしてしまうコールバックをノンブロッキングなものに変換する方法でもありません。</p>
+</div></blockquote>
+<p>最後の点は、ブロックするコールバックを使って遅延オブジェクトを構築することで確認できます。 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-block.py">twisted-deferred/defer-block.py</a> にあるコード例を確認してください。ふたつ目のコールバックは <code class="docutils literal notranslate"><span class="pre">time.sleep</span></code> 関数を使ってブロックしています。このスクリプトを実行させて <code class="docutils literal notranslate"><span class="pre">print</span></code> 文の順序をよく見てみると、ブロッキング・コールバックは遅延オブジェクトの中でもブロックしてしまうことが明らかになるでしょう。</p>
+</div>
+<div class="section" id="id3">
+<h2>まとめ<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">Deferred</span></code> を返すことで、関数はユーザーに「自分は非同期です」と伝えて、結果が到着したときにそれを非同期に獲得するための機構 (コールバックとエラー用コールバックをここで追加！) を提供します。遅延オブジェクトは Twisted のコードベースでは広くどこでも使われています。Twisted の API を探検してみるとどこを向いてもそれらに直面するでしょう。このため、遅延オブジェクトに親しんで使うことが心地よくなっていくことは、やるべき価値のあることです。</p>
+<p>クライアント 4.0 は、真に “Twisted style” で書かれた Twisted を使う詩のクライアントとしては最初のバージョンです。非同期な関数呼び出しの戻り値として遅延オブジェクトを使うのです。もう少し明確にするために使えた Twisted の API もいくつかありますが、いかにシンプルに Twisted のプログラムが書けるかを示すにはとても良い例だと思っています。少なくともクライアント・サイドにおいては。これからは、詩のサーバーも Twisted を使って書き直していくことになるでしょう。</p>
+<p>しかし、遅延オブジェクトに関して十分とも言えません。比較的小さなコード片にしては、 <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスは驚くべきほどたくさんの機能を提供してくれます。より多くの機能、そしてその動機に関しては、”<a class="reference internal" href="p09.html"><span class="doc">パート9: Deferred 再入門</span></a>”で検討していきましょう。</p>
+</div>
+<div class="section" id="id4">
+<h2>おすすめの練習問題<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>クライアント 4.0 を次のように更新してみてください。指定時間が経過しても詩を受信しなかった場合にタイムアウトするように。そしてその場合に、独自の例外と一緒にエラー用コールバックを作動させてください。これをやるときに、接続を閉じることを忘れないでくださいね。</p></li>
+<li><p>クライアント 4.0 を次のように更新してみてください。詩のダウンロードに失敗したら、ユーザーがどのサーバが問題の原因なのかを判別できるよう適切なサーバのアドレスを出力するように。コールバックとエラー用コールバックを付け足すときは追加引数 (positional-arguments でも keywork-arguments でも) を受け取れることを <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L172">忘れない</a> でください。</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p07.html">パート7: Deferred 入門</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p09.html">パート9: Deferred 再入門</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

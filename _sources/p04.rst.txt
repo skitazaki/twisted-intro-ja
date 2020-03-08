@@ -1,0 +1,286 @@
+=======================
+パート4: Twisted で詩を
+=======================
+
+最初の Twisted クライアント
+---------------------------
+Twisted はサーバを書くために使われることが多いのですが、クライアントの方が簡単ですし、できるだけ簡単なところから始めていくことにしましょう。最初の詩のクライアントを Twisted を使って書いてみましょう。ソースコードは `twisted-client-1/get-poetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py>`_ にあります。その前にサーバを立ち上げておきましょう。
+::
+
+    python blocking-server/slowpoetry.py --port 10000 poetry/ecstasy.txt --num-bytes 30
+    python blocking-server/slowpoetry.py --port 10001 poetry/fascination.txt
+    python blocking-server/slowpoetry.py --port 10002 poetry/science.txt
+
+そうしたら、次のようにしてクライアントを実行してみてください。
+::
+
+    python twisted-client-1/get-poetry.py 10000 10001 10002
+
+以下のような出力を得られるでしょう。
+::
+
+    Task 1: got 60 bytes of poetry from 127.0.0.1:10000
+    Task 2: got 10 bytes of poetry from 127.0.0.1:10001
+    Task 3: got 10 bytes of poetry from 127.0.0.1:10002
+    Task 1: got 30 bytes of poetry from 127.0.0.1:10000
+    Task 3: got 10 bytes of poetry from 127.0.0.1:10002
+    Task 2: got 10 bytes of poetry from 127.0.0.1:10001
+    ...
+    Task 1: 3003 bytes of poetry
+    Task 2: 623 bytes of poetry
+    Task 3: 653 bytes of poetry
+    Got 3 poems in 0:00:10.134220
+
+
+Twisted を使っていない非同期クライアントと一緒ですね。本質的に全く同じことをしていますので驚くようなことではありません。どのように動作しているかを理解するためにソースコードを見ていきましょう。これから議論していくソースコードを確認できるようにクライアントのファイルをエディタで開いてください。
+
+    注意：パート１で述べたように、いくつかの非常に低レベルな API を使うことから Twisted の使い方を学習していきます。このようにすることで、Twisted の抽象化レイヤを回避し、内側から外側 (inside out) に向かって Twisted のことを学んでいけます。しかしこのことは、始めに学習するたくさんの API は実際のコードを書くときにはあまり使わない、ということを意味します。最初の方のプログラムは練習用の課題として記憶に留めておくだけで構いません。製品レベルのソフトウェアの書き方の例ではありません。
+
+Twisted クライアントは `PoetrySocket <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py#L53>`_ オブジェクトの集合を生成することから始めます。PoetrySocket は実際のネットワークソケットを作り、サーバに接続し、ノンブロッキングモードに切り替えることで自身を初期化します。
+::
+
+    self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    self.sock.connect(address)
+    self.sock.setblocking(0)
+
+以降では、ソケットを直接扱うような抽象化のレベルに出会うことはなくなるでしょう。でも、今のところはまだ必要です。ネットワーク接続を確立した後では、 ``PoetrySocket`` は自分自身を ``addReader`` メソッドを介して ``reactor`` に渡します。
+::
+
+    # tell the Twisted reactor to monitor this socket for reading
+    from twisted.internet import reactor
+    reactor.addReader(self)
+
+このメソッドは、データが来るかを監視していて欲しいファイルディスクリプタを Twisted に渡します。ファイルディスクリプタとコールバックではなくオブジェクトを Twisted に渡しているのは何故でしょう？そして、Twisted は間違いなく詩に特有のコードを持ち合わせていないのに、私たちが渡したオブジェクトの扱い方をどうやって知るのでしょうか？私を信じてください。確認しましたから。 `twisted.internet.interfaces <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py>`_ モジュールを開いて、私に付いてきてくださいね。
+
+Twisted のインターフェイス
+--------------------------
+Twisted には ``interfaces`` と呼ばれるサブモジュールがたくさんあります。それぞれが ``Interface`` クラスの集まりを定義しています。バージョン 8.0 では、Twisted は `zope.interface <http://www.zope.org/Products/ZopeInterface>`_ をそれらのクラスの基底クラスとして使っていますが、このパッケージの詳細は私たちにとっては取り立てて重要ではありません。あなたがまさに目にしてしているもののように、私たちが興味あるのは Twisted 自身 におけるインターフェイスのサブクラスなのです。
+
+インターフェイスの主な目的のひとつはドキュメントです。Python プログラマなら間違いなく `ダックタイピング <http://en.wikipedia.org/wiki/Duck_typing>`_ に慣れているでしょう。原則としてオブジェクトの型はクラス階層における位置ではなく外部に公開されたインターフェイスによって決定される、ということです。したがって、同じ公開インターフェイスを表す二つのオブジェクト (アヒルのように歩き、アヒルのように鳴く、というやつです) は、ダックタイピングが考慮されている限り、同じようなものなのです (a duck!)。とはいえ、インターフェイスではアヒルのように歩くとは何たるかを特定する方法はいくぶん定式化されています。
+
+``twisted.internet.interfaces`` のソースコードを ``addReader`` メソッドの定義まで進めてください。 `IReactorFDSet <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L801>`_ インターフェイスで宣言されており、次のようになっているでしょう。
+::
+
+    def addReader(reader):
+        """
+        I add reader to the set of file descriptors to get read events for.
+
+        @param reader: An L{IReadDescriptor} provider that will be checked for
+                       read events until it is removed from the reactor with
+                       L{removeReader}.
+
+        @return: C{None}.
+        """
+
+``IReactorFDSet`` は Twisted の reactor が実装するインターフェイスの内のひとつです。すべての Twisted の reactor には上記の docstring で説明されているように動く ``addReader`` と呼ばれるメソッドがあります。メソッド宣言には ``self`` 引数がありません。公開インターフェイスを宣言することにしか関与せず、 ``self`` 引数は実装の一部 (つまり、呼び出し側が ``self`` を明示的に渡さない、ということです) であるからです。インターフェイスオブジェクトは決してインスタンス化されませんし、現実の実装の基底クラスとして使われることもありません。
+
+    * **ノート１：** 技術的なことをいうと、 ``IReactorFDSet`` はファイルディスクリプタを待ち受けるような reactor によって実装されているだけです。私が知る限りでは、現在利用可能な全ての reactor の実装がそうです。
+    * **ノート２：** インターフェイスはドキュメント以外にも活用できます。 
+      ``zope.interface`` モジュールは、クラスがひとつ以上のインターフェイスを実装することを明示的に宣言できるようにし、実行時にそれらの宣言を検証する機構を提供します。
+      適合 (adaptation) の概念もサポートします。あるインターフェイスを直接にはサポートしていないかもしれないオブジェクトにそのインターフェイスを動的に提供することです。しかし、より進んだユースケースには踏み込みません。
+    * **ノート３：** インターフェイスと `抽象基底クラス <http://www.python.org/dev/peps/pep-3119/>`_ の類似性に気付いたでしょうか。
+      最近になって Python の言語機構に加えられたものです。ここではその類似性と違いについて考えを進めませんが、
+      Glyph の `エッセイ <http://glyph.twistedmatrix.com/2009/02/explaining-why-interfaces-are-great.html>`_ を読んでみるのも良いでしょう。
+      彼は Twisted プロジェクトの創始者であり、そのエッセイは核心に触れるものです。
+
+上述の docstring によれば、 ``addReader`` の ``reader`` 引数は ``IReadDescriptor`` インターフェイスを実装しているべきです。このため、 ``PoetrySocket`` オブジェクトもそうしなくてはいけません。
+この新しいインターフェイスを見つけるためにモジュールのソースコードをスクロールしていくと、次の記述に出会います。
+::
+
+    class IReadDescriptor(IFileDescriptor):
+
+        def doRead():
+            """
+            Some data is available for reading on your descriptor.
+            """
+
+``PoetrySocket`` オブジェクトの ``doRead`` の実装も見つかるでしょう。Twisted の reactor に呼ばれたときはいつでも非同期にソケットからデータを読み込みます。このため、 ``doRead`` は実際のところコールバックです。しかし、Twisted に直接渡すのではなく、 ``doRead`` メソッドと一緒にオブジェクト内で渡します。これは Twisted フレームワークではよくある書き方です。関数を渡すのではなく、所定のインターフェイスを実装したオブジェクトを渡します。この方法だと、単一の引数で関連するコールバック (インターフェイスで定義されているメソッド) の集合を渡せるようになります。また、オブジェクトに保存された共有状態を介してコールバック同士でお互いに通信させられます。
+
+それでは、 ``PoetrySocket`` オブジェクトで実装されているその他のコールバックは何でしょうか？ ``IReadDescriptor`` は ``IFileDescriptor`` の子クラスであることに注意してください。 ``IReadDescriptor`` を実装している全てのオブジェクトは ``IFileDescriptor`` も実装しなくてはいけない、ということです。ソースコードをもう少しスクロールしていくと、次の記述があります。
+::
+
+    class IFileDescriptor(ILoggingContext):
+        """
+        A file descriptor.
+        """
+
+        def fileno():
+            ...
+
+        def connectionLost(reason):
+            ...
+
+docstring を示しましたが、これらのコールバックの目的は名前からして明確です。 ``fileno`` は着目しているファイルディスクリプタを返すべきですし、 ``connectionLost`` は接続を閉じたときに呼ばれます。そして、 ``PoetrySocket`` オブジェクトもこうしたメソッドを実装していることが分かりますね。
+
+最後に、 ``IFileDescriptor`` は ``ILoggingContext`` を継承しています。ここではこれ以上は述べませんが、 ``logPrefix`` コールバックを実装する必要があるのはこのためです。 `interfaces <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py>`_ モジュールで詳しいことを確認できます。
+
+    *NOTE：* ``doRead`` はソケットが閉じられたときを示す特殊な値を返していることに気付いたかもしれません。
+    どうすれば分かるでしょうか？基本的には、これなしでは動作しませんでしたし、何をしているかを確認するために同じインターフェイスの Twisted 内の実装をチラッと見ました。
+    これについて腰を据えて学習したいかもしれません。ソフトウェアの文書はたまには間違っていたり不完全なこともあります。
+    たぶん、あなたがそのショックから立ち直ったとき、私はパート５を書き終えているでしょう。
+
+コールバックについてもっと詳しく
+--------------------------------
+Twisted を使った新しいクライアントは元々の非同期クライアントに極めて近い状態になりました。どちらのクライアントもそれぞれのソケットに接続し、そこから (非同期に) データを読み込みます。大きな違いは、Twisted のクライアントは ``select`` ループを必要としないことです。Twisted の reactor を代わりに使いますから。
+
+``doRead`` コールバックは最も重要なもののひとつです。ソケットから読み込み可能なデータがあると、Twisted はそれを呼び出します。図７にその処理の様子を表します。
+
+.. _figure7:
+
+.. figure:: images/p04_reactor-doread.png
+
+    図７： ``doRead`` コールバック
+
+
+コールバックが呼び出される度に、最大限のデータを読み込み、ブロックしないで止まります。パート３で述べたように、おかしな挙動でも (ブロックが必要なくても) Twisted は私たちのコードを止めません。記述した通りに実行でき、起こったことを確認できます。Twisted クライアントと同じディレクトリに、 `twisted-client-1/get-poetry-broken.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry-broken.py>`_ と呼ばれる壊れたクライアントがあります。このクライアントはふたつの例外を投げる点が、これまで見てきたものと異なります。
+
+#. 壊れたクライアントはソケットをノンブロッキングにしません。
+#. ``doRead`` コールバックはソケットが閉じるまでバイト列を (たぶんブロックしながら) 読み続けるだけです。
+
+それでは、次のようにして壊れたクライアントを実行させてみましょう。
+::
+
+    python twisted-client-1/get-poetry-broken.py 10000 10001 10002
+
+
+こんな感じの出力になるでしょう。
+::
+
+    Task 1: got 3003 bytes of poetry from 127.0.0.1:10000
+    Task 3: got 653 bytes of poetry from 127.0.0.1:10002
+    Task 2: got 623 bytes of poetry from 127.0.0.1:10001
+    Task 1: 3003 bytes of poetry
+    Task 2: 623 bytes of poetry
+    Task 3: 653 bytes of poetry
+    Got 3 poems in 0:00:10.132753
+
+
+タスクの順番がちょっと違うことを除けば、これは元々のブロッキングクライアントのように見えます。というよりは、壊れたクライアントはブロッキングクライアントであるからに他なりません。コールバック内でブロッキングの ``recv`` 呼び出しを使うことによって、非同期な Twisted プログラムを同期版に変更しました。ですから、非同期の利点が全くなく、 ``select`` ループの複雑さに向き合うことになりました。
+
+Twisted のようなイベントループが提供する種類のマルチタスクは `cooperative <http://en.wikipedia.org/wiki/Computer_multitasking#Cooperative_multitasking.2Ftime-sharing>`_ です。Twisted はファイルディスクリプタへの読み書きの準備ができたときに私たちに知らせてくれますが、ブロッキングしない程度の量のデータしか転送しないようにうまく振舞わなくてはいけません。そして、他の種類のブロッキングコール、 ``os.system`` のようなもの、を避けなくてはいけません。さらに、(CPU に影響を受ける) 長時間の計算を必要とするタスクがあると、それを小さなチャンクに分割するのは私たちの仕事になります。入出力のタスクを可能な限り進められるようにするためです。
+
+壊れたクライアントがそれでも動作する、ということには意味があることに気をつけてください。きちんと全ての詩をダウンロードしますね。非同期入出力の効率性の利点を享受できない、というだけです。それでも、壊れたクライアントは元々のブロッキングクライアントより非常に早く動作することに気付くかもしれません。壊れたクライアントはプログラム開始時点で全てのサーバに接続するためです。サーバは即座にデータを送り始めて、たとえ (限界まで) 読み込めなくても OS は入力データのいくらかをバッファリングしますので、ブロッキングクライアントは一度にひとつのサーバからしかデータを読み込めませんが効率的に他のサーバからデータを受け取ります。
+
+しかし、この「トリック」は短い詩のような少量のデータにしか機能しません。もし、たとえば、2000万語からなる、あるハッカーが世界最高の `Lisp <http://http//en.wikipedia.org/wiki/Lisp_(programming_language)>`_ インタープリタを書いて本当の愛を勝ち取るという挑戦を綴った大作 (訳注：原文では epic sagas) を三つダウンロードしていたら、オペレーティングシステムのバッファはすぐに満杯になってしまい、壊れたクライアントは元々のブロッキングのものに比べて恐ろしく非効率的になっていたことでしょう。
+
+まとめ
+------
+Twisted を使った最初の詩のクライアントに関してこれ以上述べることはありません。詩を待っている ``PoetrySockets`` がなくなったら `connectionLost <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py#L74>`_ コールバックが reactor をシャットダウンさせる、ということには気をつけた方がよいかもしれません。プログラム内では詩をダウンロードする以外のことをやっていないように思われますのでのでそれほど大したテクニックではありませんが、より低レベルの reactor の API、 ``removeReader`` と ``getReaders`` 、を使っています。
+
+ここでのクライアントの実装に使った ``Reader`` の API と同様に ``Writer`` もあります。これは、データを送り出す
+間に監視しておきたいファイルディスクリプタに対して想像通りに動作します。もっと詳しいことは `interfaces <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py>`_ ファイルで確認してください。読み込みと書き出しを別々の API にしている理由は、 ``select`` の呼び出しが二種類のイベント (ファイルディスクリプタは読み書きのそれぞれで有効になる) を区別しているためです。もちろん、同じファイルディスクリプタで両方のイベントを待ち受けることもできます。
+
+":doc:`p05`"では、もう少し高次元の抽象化を使って Twisted による詩のクライアントの二つ目のバージョンを記述していきます。その過程で、Twisted のインターフェイスと API をもう少し学んでいきます。
+
+おすすめの練習問題
+------------------
+#. サーバへの接続に失敗したときにプログラムがクラッシュしないよう直してみましょう。
+#. 指定された時間で詩が終わらないようならクライアントにタイムアウトさせるようにするために ``callLater`` を使ってください。詩が時間内に終わるようならタイムアウトをキャンセルできるように、 ``callLater`` の戻り値を読み取ってください。
+
+..
+    <H2>Part 4: Twisted Poetry
+    This continues the introduction started <A href="http://krondo.com/blog/?p=1209">here</A>. You can find an index to the entire series <A href="http://krondo.com/blog/?page_id=1327">here</A>.
+    <H3>Our First Twisted Client
+    Although Twisted is probably more often used to write servers, clients are simpler than servers and we're starting out as simply as possible. Let's try out our first poetry client written with Twisted. The source code is in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py"><TT>twisted-client-1/get-poetry.py</TT></A>. Start up some poetry servers as before:
+    python blocking-server/slowpoetry.py --port 10000 poetry/ecstasy.txt --num-bytes 30
+    python blocking-server/slowpoetry.py --port 10001 poetry/fascination.txt
+    python blocking-server/slowpoetry.py --port 10002 poetry/science.txt
+    And then run the client like this:
+    python twisted-client-1/get-poetry.py 10000 10001 10002
+    And you should get some output like this:
+    Task 1: got 60 bytes of poetry from 127.0.0.1:10000
+    Task 2: got 10 bytes of poetry from 127.0.0.1:10001
+    Task 3: got 10 bytes of poetry from 127.0.0.1:10002
+    Task 1: got 30 bytes of poetry from 127.0.0.1:10000
+    Task 3: got 10 bytes of poetry from 127.0.0.1:10002
+    Task 2: got 10 bytes of poetry from 127.0.0.1:10001
+    ...
+    Task 1: 3003 bytes of poetry
+    Task 2: 623 bytes of poetry
+    Task 3: 653 bytes of poetry
+    Got 3 poems in 0:00:10.134220
+    Just like we did with our non-Twisted asynchronous client. Which isn't surprising as they are doing essentially the same thing. Let's take a look at the source code to see how it works. Open up the client in your editor so you can examine the code we are discussing.
+    <P style="padding-left: 30px;"><STRONG>Note</STRONG>: As I mentioned in Part 1, we will begin our use of Twisted by using some very low-level APIs. By doing this we bypass some of the layers of Twisted's abstractions so we can learn Twisted from the "inside out". But this means a lot of the APIs we will learn in the beginning are not often used when writing real code. Just keep in mind that these early programs are learning exercises, not examples of how to write production software.
+    The Twisted client starts up by creating a set of <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py#L53"><CODE>PoetrySocket</CODE></A> objects. A <CODE>PoetrySocket</CODE> initializes itself by creating a real network socket, connecting to a server, and switching to non-blocking mode:
+    self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    self.sock.connect(address)
+    self.sock.setblocking(0)
+    Eventually we'll get to a level of abstraction where we aren't working with sockets at all, but for now we still need to. After creating the network connection, a <CODE>PoetrySocket</CODE> passes <EM>itself</EM> to the <CODE>reactor</CODE> via the <CODE>addReader</CODE> method:
+    # tell the Twisted reactor to monitor this socket for reading
+    from twisted.internet import reactor
+    reactor.addReader(self)
+    This method gives Twisted a file descriptor you want to monitor for incoming data. Why are we passing Twisted an object instead of a file descriptor and a callback? And how will Twisted know what to do with our object since Twisted certainly doesn't contain any poetry-specific code? Trust me, I've looked. Open up the <TT><A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py">twisted.internet.interfaces</A></TT> module and follow along with me.
+    <H3>Twisted Interfaces
+    There are a number of sub-modules in Twisted called <CODE>interfaces</CODE>. Each one defines a set of <CODE>Interface</CODE> classes. As of version 8.0, Twisted uses <CODE><A href="http://www.zope.org/Products/ZopeInterface">zope.interface</A></CODE> as the basis for those classes, but the details of that package aren't so important for us. We're just concerned with the Interface sub-classes in Twisted itself, like the ones you are looking at now.
+    One of the principle purposes of Interfaces is documentation. As a Python programmer you are doubtless familiar with <A href="http://en.wikipedia.org/wiki/Duck_typing">Duck Typing</A>, the notion that the type of an object is principally defined not by its position in a class hierarchy but by the public interface it presents to the world. Thus two objects which present the same public interface (i.e., walk like a duck, quack like a …) are, as far as duck typing is concerned, the same sort of thing (a duck!). Well an Interface is a somewhat formalized way of specifying just what it means to walk like a duck.
+    Skip down the <TT>twisted.internet.interfaces</TT> source code until you come to the definition of the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L810"><CODE>addReader</CODE></A> method. It is declared in the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L801"><CODE>IReactorFDSet</CODE></A> Interface and should look something like this:
+    def addReader(reader):
+        """
+        I add reader to the set of file descriptors to get read events for.
+
+        @param reader: An L{IReadDescriptor} provider that will be checked for
+                       read events until it is removed from the reactor with
+                       L{removeReader}.
+
+        @return: C{None}.
+        """
+    <CODE>IReactorFDSet</CODE> is one of the Interfaces that Twisted reactors implement. Thus, any Twisted reactor has a method called <CODE>addReader</CODE> that works as described by the docstring above. The method declaration does not have a <CODE>self</CODE> argument because it is solely concerned with defining a public interface, and the <CODE>self</CODE> argument is part of the implementation (i.e., the caller does not have to pass <CODE>self</CODE> explicitly). Interface objects are never instantiated or used as base classes for real implementations.
+    <P style="padding-left: 30px;"><STRONG>Note 1:</STRONG> Technically, <CODE>IReactorFDSet</CODE> would only be implemented by reactors that support waiting on file descriptors. As far as I know, that currently includes all available reactor implementations.
+    <P style="padding-left: 30px;"><STRONG>Note 2</STRONG>: It is possible to use Interfaces for more than documentation. The <CODE>zope.interface</CODE> module allows you to explicitly declare that a class implements one or more interfaces, and provides mechanisms to examine these declarations at run-time. Also supported is the concept of adaptation, the ability to dynamically provide a given interface for an object that might not support that interface directly. But we're not going to delve into these more advanced use cases.
+    <P style="padding-left: 30px;"><STRONG>Note 3:</STRONG> You might notice a similarity between Interfaces and <A href="http://www.python.org/dev/peps/pep-3119/">Abstract Base Classes</A>, a recent addition to the Python language. We will not be exploring their similarities and differences here, but you might be interested in reading an <A href="http://glyph.twistedmatrix.com/2009/02/explaining-why-interfaces-are-great.html">essay</A> by Glyph, the Twisted project founder, that touches on that subject.
+    According to the docstring above, the <CODE>reader</CODE> argument of <CODE>addReader</CODE> should implement the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L947"><CODE>IReadDescriptor</CODE></A> interface. And that means our <CODE>PoetrySocket</CODE> objects have to do just that.<BR>
+    Scrolling through the module to find this new interface, we see:
+    class IReadDescriptor(IFileDescriptor):
+
+        def doRead():
+            """
+            Some data is available for reading on your descriptor.
+            """
+    And you will find an implementation of <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py#L88"><CODE>doRead</CODE></A> on our <CODE>PoetrySocket</CODE> objects. It reads data from the socket asynchronously, whenever it is called by the Twisted reactor. So <CODE>doRead</CODE> is really a callback, but instead of passing it directly to Twisted, we pass in an object with a <CODE>doRead</CODE> method. This is a common idiom in the Twisted framework — instead of passing a function you pass an object that must implement a given Interface. This allows us to pass a set of related callbacks (the methods defined by the Interface) with a single argument. It also lets the callbacks communicate with each other through shared state stored on the object.
+    So what other callbacks are implemented on <CODE>PoetrySocket</CODE> objects? Notice that <CODE>IReadDescriptor</CODE> is a sub-class of <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L918"><CODE>IFileDescriptor</CODE></A>. That means any object that implements <CODE>IReadDescriptor</CODE> must also implement <CODE>IFileDescriptor</CODE>. And if you do some more scrolling, you will find:
+    class IFileDescriptor(ILoggingContext):
+        """
+        A file descriptor.
+        """
+
+        def fileno():
+            ...
+
+        def connectionLost(reason):
+            ...
+    I left out the docstrings above, but the purpose of these callbacks is fairly clear from the names: <CODE>fileno</CODE> should return the file descriptor we want to monitor, and <CODE>connectionLost</CODE> is called when the connection is closed. And you can see our <CODE>PoetrySocket</CODE> objects implement those methods as well.
+    Finally, <CODE>IFileDescriptor</CODE> inherits from <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L905"><CODE>ILoggingContext</CODE></A>. I won't bother to show it here, but that's why we need to implement the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py#L110"><CODE>logPrefix</CODE></A> callback. You can find the details in the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py"><CODE>interfaces</CODE></A> module.
+    <P style="padding-left: 30px;"><STRONG>Note</STRONG>: You might notice that <CODE>doRead</CODE> is returning special values to indicate when the socket is closed. How did I know to do that? Basically, it didn't work without it and I peeked at Twisted's implementation of the same interface to see what to do. You may wish to sit down for this: sometimes software documentation is wrong or incomplete. Perhaps when you have recovered from the shock, I'll have finished Part 5.
+    <H3>More on Callbacks
+    Our new Twisted client is really quite similar to our original asynchronous client. Both clients connect their own sockets, and read data from those sockets (asynchronously). The main difference is the Twisted client doesn't need its own <CODE>select</CODE> loop — it uses the Twisted reactor instead.
+    The <CODE>doRead</CODE> callback is the most important one. Twisted calls it to tell us there is some data ready to read from our socket. We can visualize the process in Figure 7:
+    <DIV id="attachment_1479" class="wp-caption aligncenter" style="width: 356px"><A href="./part4_files/reactor-doread.png"><IMG class="size-full wp-image-1479" title="Figure 7: the doRead callback" src="./part4_files/reactor-doread.png" alt="Figure 7: the doRead callback" width="346" height="276"></A><P class="wp-caption-text">Figure 7: the doRead callback</DIV>
+    Each time the callback is invoked it's up to us to read all the data we can and then stop without blocking. And as we said in Part 3, Twisted can't stop our code from misbehaving (from blocking needlessly). We can do just that and see what happens. In the same directory as our Twisted client is a broken client called <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry-broken.py"><TT>twisted-client-1/get-poetry-broken.py</TT></A>. This client is identical to the one you've been looking at, with two exceptions:
+    <OL>
+    * The broken client doesn't bother to make the socket non-blocking.
+    * The <CODE>doRead</CODE> callback just keeps reading bytes (and possibly blocking) until the socket is closed.
+    </OL>
+    Now try running the broken client like this:
+    python twisted-client-1/get-poetry-broken.py 10000 10001 10002
+    You'll get some output that looks something like this:
+    Task 1: got 3003 bytes of poetry from 127.0.0.1:10000
+    Task 3: got 653 bytes of poetry from 127.0.0.1:10002
+    Task 2: got 623 bytes of poetry from 127.0.0.1:10001
+    Task 1: 3003 bytes of poetry
+    Task 2: 623 bytes of poetry
+    Task 3: 653 bytes of poetry
+    Got 3 poems in 0:00:10.132753
+    Aside from a slightly different task order this looks like our original blocking client. But that's because the broken client <EM>is</EM> a blocking client. By using a blocking <CODE>recv</CODE> call in our callback, we've turned our nominally asynchronous Twisted program into a synchronous one. So we've got the complexity of a <CODE>select</CODE> loop without any of the benefits of asynchronicity.
+    The sort of multi-tasking capability that an event loop like Twisted provides is <A href="http://en.wikipedia.org/wiki/Computer_multitasking#Cooperative_multitasking.2Ftime-sharing">cooperative</A>. Twisted will tell us when it's OK to read or write to a file descriptor, but we have to play nice by only transferring as much data as we can without blocking. And we must avoid making other kinds of blocking calls, like <CODE>os.system</CODE>. Furthermore, if we have a long-running computational (CPU-bound) task, it's up to us to split it up into smaller chunks so that I/O tasks can still make progress if possible.
+    Note that there is a sense in which our broken client still works: it does manage to download all the poetry we asked it to. It's just that it can't take advantage of the efficiencies of asynchronous I/O. Now you might notice the broken client still runs a lot faster than the original blocking client. That's because the broken client connects to all the servers at the start of the program. Since the servers start sending data immediately, and since the OS will buffer some of the incoming data for us even if we don't read it (up to a limit), our blocking client is effectively receiving data from the other servers even though it is only reading from one at a time.
+    But this "trick" only works for small amounts of data, like our short poems. If we were downloading, say, the three 20 million-word epic sagas that chronicle one hacker's attempt to win his true love by writing the world's greatest <A href="http://http//en.wikipedia.org/wiki/Lisp_(programming_language)">Lisp</A> interpreter, the operating system buffers would quickly fill up and our broken client would be scarcely more efficient than our original blocking one.
+    <H3>Wrapping Up
+    I don't have much more to say about our first Twisted poetry client. You might note the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py#L74"><CODE>connectionLost</CODE></A> callback shuts down the reactor after there are no more <CODE>PoetrySocket</CODE>s waiting for poems. That's not such a great technique since it assumes we aren't doing anything else in the program other than download poetry, but it does illustrate a couple more low-level reactor APIs, <CODE>removeReader</CODE> and <CODE>getReaders</CODE>.
+    There are <CODE>Writer</CODE> equivalents to the <CODE>Reader</CODE> APIs we used in this client, and they work in analogous ways for file descriptors we want to monitor for sending data to. Consult the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py"><CODE>interfaces</CODE></A> file for more details. The reason reading and writing have separate APIs is because the <CODE>select</CODE> call distinguishes between those two kinds of events (a file descriptor becoming available for reading or writing, respectively). It is, of course, possible to wait for both events on the same file descriptor.
+    In <A href="http://krondo.com/blog/?p=1522">Part 5</A>, we will write a second version of our Twisted poetry client using some higher-level abstractions, and learn some more Twisted Interfaces and APIs along the way.
+    <H3>Suggested Exercises
+    <OL>
+    * Fix the client so that a failure to connect to a server does not crash the program.
+    * Use <CODE>callLater</CODE> to make the client timeout if a poem hasn't finished after a given interval. Read about the return value of <CODE>callLater</CODE> so you can cancel the timeout if the poem finishes on time.
+    </OL>
+

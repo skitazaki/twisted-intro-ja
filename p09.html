@@ -1,0 +1,312 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート9: Deferred 再入門 &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート10: 変換された詩" href="p10.html" />
+    <link rel="prev" title="パート8: Deferred で詩を" href="p08.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート9: Deferred 再入門</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p08.html">パート8: Deferred で詩を</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p10.html">パート10: 変換された詩</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="deferred">
+<h1>パート9: Deferred 再入門<a class="headerlink" href="#deferred" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id1">
+<h2>コールバックのさらなる影響<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>コールバックについてもう一度考えるために、一息休憩を入れましょう。
+Twisted 風に簡単な非同期プログラムを書くのに十分なほど遅延オブジェクトのことは理解できてきましたが、 <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> はもっと複雑な設定をすればさらに多くの機能を提供してくれます。
+ということで、もっと複雑な設定をいくつか練り上げて、コールバックを伴ったプログラミングでそれらがどのような種類の挑戦に直面するかを考えます。
+それらにどうやって立ち向かっているかをみていきましょう。</p>
+<p>議論を盛り上げるために、私たちの詩のクライアントに仮想的な機能を追加することにしましょう。
+コンピュータ・サイエンスの教授が詩に関連する新しいアルゴリズム、”Byronification Engine”、を考え出すときに直面する問題を想像してみてください。
+この無限アルゴリズムは入力としてひとつの詩を受け取って、元の詩に似ていますが <a class="reference external" href="http://en.wikipedia.org/wiki/George_Gordon_Byron,_6th_Baron_Byron">Lord Byron</a> 風に記述された新しい詩を生成します。
+さらには、私たちの先生は親切なことに Python でお手本となる実装を提供してくれています。こんなインターフェイスです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">IByronificationEngine</span><span class="p">(</span><span class="n">Interface</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">byronificate</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Return a new poem like the original, but in the style of Lord Byron.</span>
+
+<span class="sd">        Raises GibberishError if the input is not a genuine poem.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+</pre></div>
+</div>
+<p>たいていの最先端のソフトウェアのように、この実装にはいくつかのバグがあります。文書化された例外に加えて、 <code class="docutils literal notranslate"><span class="pre">byronificate</span></code> メソッドはときどきランダムな例外を送出します。教授が対処し忘れた滅多に発生しない状況に嵌ったときです。</p>
+<p>また、reactor の扱いに悩まされることなくメインスレッドで単純に呼び出せるくらいに、このエンジンが十分高速に実行できると仮定しましょう。私たちのプログラムには以下のように動作して欲しいのです。</p>
+<ol class="arabic simple">
+<li><p>詩のダウンロードを試みなさい。</p></li>
+<li><p>ダウンロードに失敗したら、詩を取得できなかったとユーザに伝えなさい。</p></li>
+<li><p>詩を取得できたら、Byronification エンジンを使って変換しなさい。</p></li>
+<li><p>エンジンが <code class="docutils literal notranslate"><span class="pre">GibberishError</span></code> を送出したら、詩を取得できなかったとユーザに伝えなさい。</p></li>
+<li><p>エンジンがその他の例外を送出したら、元の詩をそのままにしておきなさい。</p></li>
+<li><p>詩を持っていれば出力しなさい。</p></li>
+<li><p>プログラムを終了しなさい。</p></li>
+</ol>
+<p>ここでの考え方では、 <code class="docutils literal notranslate"><span class="pre">GibberishError</span></code> は私たちが実際の詩をまったく取得できなかったことを意味します。このため、ユーザにダウンロードが失敗したとだけ伝えることになるでしょう。これはデバッグするときには全く持って役に立ちませんが、ユーザは詩を得られたかどうかを知りたいだけなのです。他方で、もしもエンジンが他の理由で失敗したら、サーバから取得した詩をそのまま使うことになるでしょう。結局のところ、たとえそれが Byron 式の特徴をもっていなくても、ある詩が他のものより劣っているなんてことはないのです。</p>
+<p>同期バージョンのコードはこんな感じになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">try</span><span class="p">:</span>
+    <span class="n">poem</span> <span class="o">=</span> <span class="n">get_poetry</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span> <span class="c1"># synchronous get_poetry</span>
+<span class="k">except</span><span class="p">:</span>
+    <span class="nb">print</span> <span class="o">&gt;&gt;</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="s1">&#39;The poem download failed.&#39;</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">poem</span> <span class="o">=</span> <span class="n">engine</span><span class="o">.</span><span class="n">byronificate</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">GibberishError</span><span class="p">:</span>
+        <span class="nb">print</span> <span class="o">&gt;&gt;</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="s1">&#39;The poem download failed.&#39;</span>
+    <span class="k">except</span><span class="p">:</span>
+        <span class="nb">print</span> <span class="n">poem</span> <span class="c1"># handle other exceptions by using the original poem</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span> <span class="n">poem</span>
+
+<span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>いくらかリファクタリングすればプログラムの概要をもっと簡単にできるでしょう。しかし、この状態はロジックの流れをとても明確に表しています。
+これと同じ枠組みを実装して、一番直近の詩のクライアント (遅延オブジェクトを使うものです) を更新したいのです。
+しかし、パート10まではやりません。
+今のところはかわりに <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py">クライアント 3.1</a> でどうやるのかを想像してみましょう。これは遅延オブジェクトを全く使っていない最後のクライアントです。
+例外を扱うのに悩まなかったと仮定してみると、代わりに <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry-1.py#L106">get_poem</a> コールバックを次のように変更するだけでした。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">got_poem</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+    <span class="n">poems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">byron_engine</span><span class="o">.</span><span class="n">byronificate</span><span class="p">(</span><span class="n">poem</span><span class="p">))</span>
+    <span class="n">poem_done</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">byronificate</span></code> メソッドが <code class="docutils literal notranslate"><span class="pre">GibberishError</span></code> かその他の例外を送出すると何が起きるでしょうか？パート6の”<a class="reference internal" href="p06.html#figure11"><span class="std std-ref">図１１：詩のコールバック</span></a>”を見ると、以下に挙げることが分かります。</p>
+<ol class="arabic simple">
+<li><p>ファクトリ内の <code class="docutils literal notranslate"><span class="pre">poem_finished</span></code> コールバックまで例外は広がるでしょう。このメソッドが実際にコールバックを呼び出しています。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">poem_finished</span></code> は例外を捕捉しませんので、プロトコルの <code class="docutils literal notranslate"><span class="pre">poemReceived</span></code> まで呼び出しが続くでしょう。</p></li>
+<li><p>そして <code class="docutils literal notranslate"><span class="pre">connectionLost</span></code> まで続きます。これもプロトコルの中です。</p></li>
+<li><p>Twisted 自身の内部まで続いていくと、最終的には reactor で終了します。</p></li>
+</ol>
+<p>ここまで学んできたように、reactor はクラッシュせずに例外を捕捉してログを出力します。
+しかし、ユーザに詩をダウンロードできなかったとは伝えてくれないでしょう。
+reactor は詩のことも <code class="docutils literal notranslate"><span class="pre">GibberishError</span></code> のことも知りません。全ての種類のネットワーキングで使われる汎用的なコードだからです。詩には関係ないネットワーキングでさえも使われるのです。</p>
+<p>上で述べた４つのそれぞれのステップで、例外はひとつ前のステップよりも一般的な目的のコードに移ることに気をつけましょう。
+そして、 私たちがこのクライアントに望むような特定の方法でエラーを扱うコード片の中の例外には、 <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> の後にステップがありません。
+この状況は同期コードで例外が伝播していくのとは基本的に真逆です。</p>
+<p>図15を見てください。同期版の詩のクライアントで目にするコールスタックを表しています。</p>
+<div class="figure align-default" id="id10">
+<span id="figure15"></span><img alt="_images/p09_sync-exceptions1.png" src="_images/p09_sync-exceptions1.png" />
+<p class="caption"><span class="caption-text">図１５：同期コードと例外</span><a class="headerlink" href="#id10" title="Permalink to this image">¶</a></p>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">main</span></code> 関数は高コンテキストです。なぜそこに存在するのか、どうやって振舞うべきかをプログラム全体に渡って知っているということです。
+典型的に <code class="docutils literal notranslate"><span class="pre">main</span></code> はユーザがプログラムにどうやって動いて欲しいか (そしておそらく、問題が生じたときに何をすべきか) を指示するコマンドラインオプションにアクセスするでしょう。
+また、非常に限定された目的も持ちます。コマンドラインの詩のクライアントが動く方法です。</p>
+<p>他方で、ソケットの <code class="docutils literal notranslate"><span class="pre">connect</span></code> メソッドは低コンテキストです。
+何らかのネットワークアドレスに接続すると考えられていることしか知りません。
+接続先が何であるかや、なんでそれに今すぐ接続する必要があるのかを知りません。
+しかし、 <code class="docutils literal notranslate"><span class="pre">connect</span></code> は極めて汎用的な目的を持っています。あなたが接続しようとしているサービスが何であっても、それを使えるのです。</p>
+<p><code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> はその中間にあります。
+何らかの詩を取得していることを知っています。それが唯一のできることです。けれども、もしそれができないときは何が起きるべきでしょうか。</p>
+<p><code class="docutils literal notranslate"><span class="pre">connect</span></code> が投げた例外は、低コンテキストで汎用的なコードから高コンテキストで特定の目的のコードに向かってスタックを登っていくでしょう。何かおかしいことが起きたときに何をすべきかを知っている (もしくは Python インタープリタを引っぱたいてプログラムをクラッシュさせてしまう) 十分なコンテキストを持つ何らかのコードに到達するまでです。</p>
+<p>もちろん例外は、文字通り高コンテキストのコードを探しながらというよりは、それが何であれ単にスタックを上がっていくだけです。
+典型的な同期プログラムでは、「スタックを上がる」と「高コンテキストに向かう」は同じ方向性のことです。</p>
+<p>ここで、上のクライアント 3.1 に対する理論的な変更を思い出してください。
+私たちが分析したコールスタックは図16で図にしました。いくつかの関数は簡易表記にしてあります。</p>
+<div class="figure align-default" id="id11">
+<span id="figure16"></span><img alt="_images/p09_async-exceptions4.png" src="_images/p09_async-exceptions4.png" />
+<p class="caption"><span class="caption-text">図１６：非同期コールバックと例外</span><a class="headerlink" href="#id11" title="Permalink to this image">¶</a></p>
+</div>
+<p>問題点は明確ですね。
+コールバックの中で、低コンテキストのコード (reactor) が高コンテキストのコードを呼び出しています。
+このため、例外が発生したときに、それが即座に処理されないで発生したのと同じスタックフレームで閉じられないと、処理されない例外になってしまいます。
+例外がスタックを上がっていくたびに低コンテキストなコードに移動していきますので、それが何をしているのか分かりにくくなります。</p>
+<p>例外が Twisted の中心的な部分に立ち入ってしまうと、もうどうしようもありません。
+例外を処理することはできず、記録されるだけになるでしょう (reactor が最終的にクラッシュさせます)。
+このため、私たちが「昔ながらの簡易な」コールバック (遅延オブジェクトを使わないもの) を使ってプログラムを書くときは、Twisted 固有の部分に入り込んでしまう前に全ての例外を逃さないように注意しなくてはなりません。少なくとも、自分たちのルールに沿ってエラーを扱う機会を持ちたいならば。
+私たち自身のバグによって引き起こされた例外も含みます。</p>
+<p>バグは私たちのコードの至る所に存在しえますので、 <code class="docutils literal notranslate"><span class="pre">try/except</span></code> 節のもう一段階「外の層」ですべてのコールバックを包む必要があります。これによって、打ち間違いから起こる例外も同様に処理されるようになります。
+同じことはエラー用コールバックにも当てはまります。エラーを処理するコードにも同様にバグの可能性がありますから。</p>
+<p>それにしても、これはあまり良いやり方ではありませんね。</p>
+</div>
+<div class="section" id="id3">
+<h2>遅延オブジェクトを使った良い構造<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスはこの種の問題を解決することを助けてくれることが分かりました。
+遅延オブジェクトがコールバックかエラー用コールバックを呼び出すときはいつでも、引き起こされる可能性のあるいかなる例外も捕捉してくれます。
+言い換えると、遅延オブジェクトは <code class="docutils literal notranslate"><span class="pre">try/except</span></code> 節の「外の層」のように動作してくれます。遅延オブジェクトを使っている限りは私たちはその層に関して全く記述する必要がありません。
+といっても、遅延オブジェクトは自分が捕捉した例外に対して何をするのでしょうか？簡単です。チェーンの次のエラー用コールバックに例外 (<code class="docutils literal notranslate"><span class="pre">Failure</span></code> 形式になっています) を渡していくだけです。</p>
+<p>遅延オブジェクトに私たちが付け足した最初のエラー用コールバックは、遅延オブジェクトの <code class="docutils literal notranslate"><span class="pre">errback(err)</span></code> メソッドが呼ばれたときに通知されるいかなるエラーの状態も処理するために、そこで待ち受けてくれます。
+けれども二番目のエラー用コールバックは、最初のコールバックか最初のエラー用コールバックによって引き起こされた全ての例外を処理するでしょう。
+後続のものも順次そうなります。</p>
+<p><a class="reference internal" href="p07.html#figure12"><span class="std std-ref">図１２：遅延オブジェクト</span></a> を思い出してください。チェーンにいくつかのコールバックとエラー用コールバックを持つ遅延オブジェクトの視覚的表現です。
+最初のコールバックとエラー用コールバックのペアをステージ０、次のペアをステージ１、と順番にそのように呼ぶことにしましょう。</p>
+<p>あるステージ <strong>N</strong> において、コールバックかエラー用コールバックのどちらか (実行された方です) が失敗したとすると、適切な <code class="docutils literal notranslate"><span class="pre">Failure</span></code> オブジェクトを伴ってステージ <strong>N+1</strong> のエラー用コールバックが呼ばれます。ステージ <strong>N+1</strong> のコールバックは呼び出されません。</p>
+<p>チェーンを辿りながらコールバックによって引き起こされた例外を渡すことによって、遅延オブジェクトは「より高コンテキスト」の方向に例外を移動させます。
+遅延オブジェクトの <code class="docutils literal notranslate"><span class="pre">callback</span></code> と <code class="docutils literal notranslate"><span class="pre">errback</span></code> メソッドを呼び出すことは、呼び出し元にとって (遅延オブジェクトを一回しか呼び出さない限り！) 決して例外という結果にはなりませんので、より低レベルのコードは、例外を捕捉することに関して心配することなく、安全に遅延オブジェクトを発火させることができます。
+その代わりに、より高レベルのコードは遅延オブジェクトにエラー用コールバックを付け加える (<code class="docutils literal notranslate"><span class="pre">addErrback</span></code> などで) ことで例外を捕捉します。</p>
+<p>この同期コードでは、捕捉されるとすぐに例外は伝播することを止めます。
+エラー用コールバックはどうやってそれがエラーを「捕まえた」という合図を送るのでしょうか？これもまた簡単なことです。例外を送出しないことでそうなります。
+そしてこの場合は、実行しているものはコールバック上で切り替わります。
+あるステージ <strong>N</strong> において、もしもコールバックかエラー用コールバックのどちらかが成功する (つまり例外を出さないということです) と、ステージ <strong>N</strong> からの戻り値を伴ってステージ <strong>N+1</strong> のコールバックが呼ばれます。ステージ <strong>N+1</strong> のエラー用コールバックは呼ばれません。</p>
+<p>遅延オブジェクトが作動するパターンについて分かったことをまとめてみましょう。</p>
+<ol class="arabic simple">
+<li><p>遅延オブジェクトは順序付けられたコールバックとエラー用コールバックのペア (ステージ) からなるチェーンを含みます。ペアは、それが遅延オブジェクトに付け加えられた順番通りに管理されます。</p></li>
+<li><p>ステージ 0、最初のコールバックとエラー用コールバックのペアです、は遅延オブジェクトが発火されたときに呼び出されます。遅延オブジェクトが <code class="docutils literal notranslate"><span class="pre">callback</span></code> メソッドで発火されるとステージ 0 のコールバックが呼ばれます。 <code class="docutils literal notranslate"><span class="pre">errback</span></code> メソッドで発火されるとステージ 0 のエラー用コールバックが呼ばれます。</p></li>
+<li><p>ステージ <strong>N</strong> が失敗すると、ステージ <strong>N+1</strong> のエラー用コールバックが例外 (<code class="docutils literal notranslate"><span class="pre">Failure</span></code> でラップされています) を第一引数として呼ばれます。</p></li>
+<li><p>ステージ <strong>N</strong> が成功すると、ステージ <strong>N+1</strong> のコールバックがステージ <strong>N</strong> の戻り値を第一引数として呼ばれます。</p></li>
+</ol>
+<p>このパターンを図示したのが図17です。</p>
+<div class="figure align-default" id="id12">
+<span id="figure17"></span><img alt="_images/p09_deferred-2.png" src="_images/p09_deferred-2.png" />
+<p class="caption"><span class="caption-text">図１７：遅延オブジェクト内の制御の流れ</span><a class="headerlink" href="#id12" title="Permalink to this image">¶</a></p>
+</div>
+<p>緑の線はコールバックかエラー用コールバックが成功したときに起こることを示し、赤い線は失敗したときを示します。
+これらの線は制御の流れと例外および戻り値の流れの両方がチェーンを辿っていく様子を表します。
+図17は遅延オブジェクトが通るかもしれない全ての可能性のパスを表しています。しかし、ある特定の場合に辿るのはたった一つのパスだけです。
+図18は作動する可能性のあるひとつのパスを表します。</p>
+<div class="figure align-default" id="id13">
+<span id="figure18"></span><img alt="_images/p09_deferred-31.png" src="_images/p09_deferred-31.png" />
+<p class="caption"><span class="caption-text">図１８：遅延オブジェクトが作動するパターンのひとつ</span><a class="headerlink" href="#id13" title="Permalink to this image">¶</a></p>
+</div>
+<p>図18では遅延オブジェクトの <code class="docutils literal notranslate"><span class="pre">callback</span></code> 関数が呼ばれます。それはステージ 0 のコールバックを呼び出します。そのコールバックは成功し、制御 (それと、ステージ 0 からの戻り値) はステージ 1 のコールバックに渡されます。しかし、ここでのコールバックは失敗 (例外を発生させます) し、ステージ 2 ではエラー用のコールバックに制御が移ります。エラー用コールバックはエラーを処理 (例外を発生させません) し、制御は通常のコールバックチェーンに戻ります。そして、ステージ 2 のエラー用コールバックの結果を伴ってステージ 3 のコールバックが呼び出されます。</p>
+<p>図17で描けるどんなパスもチェーンのそれぞれのステージを通りますが、どのステージでもコールバックとエラー用コールバックのペアのどちらか片方しか呼び出されないことに気をつけてください。</p>
+<p>図18では、ステージ 3 から緑の矢印を引っ張ることで、そのコールバックが成功しているように図示しています。しかし、この遅延オブジェクトにはそれ以降のステージがありませんので、ステージ 3 の結果は実際にはどこにも行きません。コールバックが成功すれば問題はありません。
+しかし、そうでない場合はどうなるでしょうか？
+もしも遅延オブジェクトの最後のステージで失敗してしまうと、それを捕捉するための <code class="docutils literal notranslate"><span class="pre">errback</span></code> がありませんので、その失敗は捕捉されなかったと言います。</p>
+<p>同期版のコードでは捕捉されない例外はインタープリタをクラッシュさせてしまうでしょう。いわゆる普通の非同期コードでは、捕捉されない例外は reactor に捕まえられてログに出力されます。
+遅延オブジェクト内の捕捉されない例外はどうなるでしょうか？
+とりあえずやってみましょう。
+<a class="reference external" href="_http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-unhandled.py#L1">twisted-deferred/defer-unhandled.py</a> にあるサンプルコードを見てください。
+このコードは、いつも例外を投げるコールバックをひとつ持つ遅延オブジェクトを発火させます。
+プログラムからの出力は次のようになります。</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">Finished</span>
+<span class="n">Unhandled</span> <span class="n">error</span> <span class="ow">in</span> <span class="n">Deferred</span><span class="p">:</span>
+<span class="n">Traceback</span> <span class="p">(</span><span class="n">most</span> <span class="n">recent</span> <span class="n">call</span> <span class="n">last</span><span class="p">):</span>
+  <span class="o">...</span>
+<span class="o">---</span> <span class="o">&lt;</span><span class="n">exception</span> <span class="n">caught</span> <span class="n">here</span><span class="o">&gt;</span> <span class="o">---</span>
+  <span class="o">...</span>
+<span class="n">exceptions</span><span class="o">.</span><span class="n">Exception</span><span class="p">:</span> <span class="n">oops</span>
+</pre></div>
+</div>
+<p>いくつか注意することがあります。</p>
+<ul class="simple">
+<li><p>最後の <code class="docutils literal notranslate"><span class="pre">print</span></code> は実行されますので、例外によってプログラムがクラッシュしてしまうわけではありません。</p></li>
+<li><p>トレースバックが出力されるだけで、インタープリタをクラッシュさせるものではないことを意味します。</p></li>
+<li><p>トレースバックのテキストは遅延オブジェクト自身が例外を捕らえた場所を教えてくれます。</p></li>
+<li><p>“Unhandled” というメッセージは “Finished” の後に出力されています。</p></li>
+</ul>
+<p>よって遅延オブジェクトを使うとき、コールバックで捕捉されない例外には、デバッグを目的として、引き続き注意が払われます。しかし、たいていはプログラムをクラッシュさせることにはなりません(実際、それらの例外は reactor に作用すらせず、遅延オブジェクトが真っ先に捕まえるでしょう)。
+ところで “Finished” が最初にやってくる理由は、遅延オブジェクトがガベージコレクタに回収されるまで “Unhandled” メッセージが実際には出力されないからです。
+その理由は先々のパートで見ていきましょう。</p>
+<p>さて、同期コードでは引数無しで <code class="docutils literal notranslate"><span class="pre">raise</span></code> キーワードを使うことで例外を「再送出 (re-raise)」できます。そうすることで、扱っていた元々の例外を投げ、完全に処理することなくエラーに対していくつかの操作を実行できます。
+エラー用コールバックで全く同様のことができますね。
+もしも次の条件のどちらかを満たすなら、遅延オブジェクトはコールバックおよびエラー用コールバックが失敗したとみなすでしょう。</p>
+<ul class="simple">
+<li><p>コールバックかエラー用コールバックが何らかの種類の例外を発生させる。</p></li>
+<li><p>コールバックかエラー用コールバックが <code class="docutils literal notranslate"><span class="pre">Failure</span></code> オブジェクトを返す。</p></li>
+</ul>
+<p>エラー用コールバックの最初の引数は常に <code class="docutils literal notranslate"><span class="pre">Failure</span></code> なので、エラー用コールバックはそこで実行したいことを実施した後に最初の引数を戻り値とすることで例外を「再送出 (re-raise)」できます。</p>
+</div>
+<div class="section" id="id4">
+<h2>コールバックとエラー用コールバック、２の２乗<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>以上の議論から明らかなことのひとつは、遅延オブジェクトにコールバックとエラー用コールバックを追加する順番には、遅延オブジェクトがどうやって発火するかで大きな違いがあることです。
+遅延オブジェクトについてもうひとつ明らかなことは、コールバックとエラー用コールバックはいつもペアで起こる、ということです。
+<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L172">Deferred</a> クラスには、チェーンにペアを追加するために使える四つのメソッドがあります。</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">addCallbacks</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">addCallback</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">addErrback</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">addBoth</span></code></p></li>
+</ol>
+<p>名前からも明らかですが、最初と最後のメソッドはチェーンにペアを追加します。
+しかし、真ん中の二つのメソッドもコールバックとエラー用コールバックのペアを追加します。
+<code class="docutils literal notranslate"><span class="pre">addCallback</span></code> メソッドは明示的なコールバック (メソッドに渡す引数) と、暗黙的な「何もしない (pass-through)」エラー用コールバックを追加します。
+何もしない関数とは、最初の引数を返すだけのダミー関数です。
+エラー用コールバックへの第一引数はいつも <code class="docutils literal notranslate"><span class="pre">Failure</span></code> なので、何もしないエラー用コールバックは常に失敗し、チェーンの次のエラー用コールバックにエラーを送ります。</p>
+<p>あなたが間違いなく思った通りに、 <code class="docutils literal notranslate"><span class="pre">addErrback</span></code> 関数は明示的なエラー用コールバックと暗黙的な何もしないコールバックを追加します。
+コールバックへの第一引数は <code class="docutils literal notranslate"><span class="pre">Failure</span></code> ではありませんので、何もしないコールバックはチェーンの次のコールバックにその結果を送ります。</p>
+</div>
+<div class="section" id="id6">
+<h2>遅延オブジェクトのシミュレータ<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>遅延オブジェクトがコールバックとエラー用コールバックを実行させる方法に慣れていくのは良いことです。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/deferred-simulator.py#L1">twisted-deferred/deferred-simulator.py</a> の Python スクリプトは「遅延オブジェクトのシミュレータ (deferred simulator)」です。遅延オブジェクトが発火する様子を探っていくための小さな Python プログラムです。
+スクリプトを実行すると、コールバックとエラー用コールバックのペアの一覧を一行ずつ入力するように促されます。
+それぞれのコールバックもしくはエラー用コールバックは次のいずれかです。</p>
+<ul class="simple">
+<li><p>与えられた値を返すもの (成功)</p></li>
+<li><p>与えられた例外を発生させるもの (失敗)</p></li>
+<li><p>引数をそのまま返すもの (何もしない)</p></li>
+</ul>
+<p>シミュレートしたい全ての組み合わせを入力するとスクリプトが出力を生成します。高解像度のアスキー・アートで、ダイアグラムがチェーンの内容と、 <code class="docutils literal notranslate"><span class="pre">callback</span></code> および <code class="docutils literal notranslate"><span class="pre">errback</span></code> メソッドで発火されるパターンを表します。
+全てを正確に見るために、ターミナルを開いているウィンドウをできるだけ広く使いたくなるでしょう。
+ダイアグラムをひとつずつ出力させるためには <code class="docutils literal notranslate"><span class="pre">--narrow</span></code> オプションを使うこともできます。
+しかし、横同士に出力させた方がそれらの関係を確認しやすいでしょう。</p>
+<p>もちろん実際のコードでは、コールバックが毎回同じ値を返すことはありませんし、ある関数は成功したり失敗したりします。
+しかしこのシミュレータは、あるコールバックとエラー用コールバックの設定において、通常の結果と失敗の組み合わせの場合に何が起こるかを図示してくれます。</p>
+</div>
+<div class="section" id="id7">
+<h2>まとめ<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>コールバックを使ったプログラミングは低コンテキストと高コンテキストのコードの間にある通常の関係を反転させますので、コールバックについてより深く考えた後では、コールバックに例外をスタックに積み上げさせても同様には動作しないことに気付きます。
+そして <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスは例外を捕捉し、その例外を上位コンテキストの reactor に受け渡すのではなくチェーンの下位コンテキストに送っていくことで、この問題に取り組んでくれます。</p>
+<p>通常の結果 (値を返します; <code class="docutils literal notranslate"><span class="pre">return</span></code>) が同様にチェーンを下っていくことも学びました。
+この二つの事実の組み合わせは、往来する発火パターン (原文; criss-cross firing pattern) の一種ということになります。
+遅延オブジェクトがそれぞれのステージにおける結果次第で、コールバックとエラー用コールバックで繋がれた線上を行ったりきたりするからです。</p>
+<p>この知識を身に付けて、”<a class="reference internal" href="p10.html"><span class="doc">パート10: 変換された詩</span></a>”では、私たちが作っている詩のクライアントをいくつかの詩の変換ロジックで書き換えていきましょう。</p>
+</div>
+<div class="section" id="id8">
+<h2>おすすめの練習問題<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h2>
+<ul>
+<li><p><a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L172">Deferred</a> における四つそれぞれのメソッドの実装を調査しましょう。コールバックとエラー用コールバックを追加するものです。全てのメソッドがコールバックのペアを追加することを確認してください。</p></li>
+<li><dl>
+<dt>このコードの違いを調査するために遅延オブジェクトのシミュレータを使ってください。</dt><dd><div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">deferred</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">my_callback</span><span class="p">,</span> <span class="n">my_errback</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>もうひとつはこのコードです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">deferred</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">my_callback</span><span class="p">)</span>
+<span class="n">deferred</span><span class="o">.</span><span class="n">addErrback</span><span class="p">(</span><span class="n">my_errback</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>後のふたつのメソッドはペアのうちの片方のメンバーとして暗黙的に関数を受け渡すことを思い出してください。</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p08.html">パート8: Deferred で詩を</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p10.html">パート10: 変換された詩</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

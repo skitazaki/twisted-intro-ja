@@ -1,0 +1,287 @@
+===============================
+パート2: ゆったりした詩と世紀末
+===============================
+
+このパートでは":doc:`p01`"で始めた入門の続きを進めていきます。もし読んでいるなら、ようこそ戻ってきてくれましたね。いよいよ自分の手を動かしてコードを書いていきましょう。でもまずはちょっと脱線して、想定していることを共有しておきましょう。
+
+想定している読者
+----------------
+Python で同期プログラムを書く基礎知識を身につけていて、Python のソケットプログラミングについて少しは知っているものと考えています。もしソケットを使ったことがなければ、とりあえず `ソケットモジュールのドキュメント <http://docs.python.org/library/socket.html#module-socket>`_ 、特に最後の方のコード例、に目を通しておくと良いでしょう。Python を使ったことがないと、これ以降はボヤッとしたものになってしまうでしょう。
+
+想定している読者のコンピュータ
+------------------------------
+私が Twisted を使ってきたのは主として Linux 上であり、コード例も Linux で作りました。意図的に Linux べったりのコードにしているつもりはありませんが、Linux や Unix のような (Mac OSX や FreeBSD など) システムでしか動作しないものがあるかもしれません。Windows はちょっと変わってますので、あなたが Windows 上で作業していても気持ち以外は助けになれません。
+
+マシンには比較的最近の `Python <http://python.org/download>`_ と `Twisted <http://twistedmatrix.com/trac/wiki/Downloads>`_ をインストールしてあるものとします。例で示すコードは Python 2.5 と Twisted 8.2.0 で開発しました。
+
+すべての例はネットワーク越しで設定できますが、単一のマシンで動作させられます。非同期プログラミングの基本的な仕組みを学習するためには単一のコンピュータが良いでしょう。
+
+コード例の入手
+--------------
+コード例は `zip <http://github.com/jdavisp3/twisted-intro/zipball/master>`_ か `tar <http://github.com/jdavisp3/twisted-intro/tarball/master>`_ か、あるいは `私の公開 git レポジトリ <http://github.com/jdavisp3/twisted-intro/tree/master>`_ を `clone する <git://github.com/jdavisp3/twisted-intro.git>`_ ことで入手できます。 `git <http://git-scm.com/>`_ か git レポジトリを読めるような版管理システムを使っているのなら、こちらの方法をお勧めします。将来的にはコード例を更新していきますし、あなたも最新の状態を保ちやすくなりますからね。おまけに図を作成するために使った SVG ファイルもあります。次の git コマンドでレポジトリを clone してください。
+::
+
+    git clone git://github.com/jdavisp3/twisted-intro.git
+
+以降では、最新のコード例があり、最上位ディレクトリを開いたシェルが複数あるものとします。(その内のひとつは README を開いておいてください)
+
+のんびりした詩
+--------------
+CPU はネットワークよりはるかに高速ですが、それでも、ほとんどのネットワークはあなたの頭がものごとを考えるよりはかなり高速ですし、少なくとも眼で追えるよりは高速です。このため、「CPU から見た」ネットワークの遅延を確認することは難しい問題になりえます。マシンが一台しかなく、バイト列が `ループバックインターフェイス <http://en.wikipedia.org/wiki/Loopback>`_ を最高速で駆け抜けていくような場合は特にそうです。人間が判別できるような人為的な遅延を持った、遅いサーバが必要です。サーバは何らかのことを提供しなくてはいけませんから、詩を提供することにしましょう。コード例には「 ``poetry`` 」というサブディレクトリがあります。 `John Donne <http://en.wikipedia.org/wiki/Donne>`_ 、 `W.B. Yeats <http://en.wikipedia.org/wiki/Yeats>`_ 、 `Edgar Allen Poe <http://en.wikipedia.org/wiki/Poe>`_ のそれぞれの詩をひとつずつ含んでいます。もちろんあなた好みの詩に入れ替えてもらって構いませんよ。
+
+基本的なのんびりした詩のサーバは `blocking-server/slowpoetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/blocking-server/slowpoetry.py>`_ で実装しています。次のようにしてインスタンスを起動できます。
+::
+
+    python blocking-server/slowpoetry.py poetry/ecstasy.txt
+
+このコマンドは John Donne の詩である「Ecstasy」を送り出すブロッキングサーバを開始します。ちょっとブロッキングサーバのソースコードをのぞいてみましょう。見れば分かるように、Twisted を使っておらず、基本的な Python のソケット操作だけです。一度にある程度のバイト数しか送り出さず、それらの間隔には同じだけの遅延があります。デフォルトでは 0.1 秒ごとに 10 バイトを送り出しますが、コマンドラインの ``--num-bytes`` と ``--delay`` オプションでパラメータを変更できます。たとえば、5 秒ごとに 50 バイトを送るためには次のようにします。
+::
+
+    python blocking-server/slowpoetry.py --num-bytes 50 --delay 5 poetry/ecstasy.txt
+
+サーバは、起動するときに待ち受けポート番号を出力します。デフォルトではマシンで利用可能なランダムなポートを使います。設定を変えて起動する場合、クライアントのコマンドを調整する必要がないように同じポート番号を使いたくなるでしょう。次のようにすると特定のポート番号を指定できます。
+::
+
+    python blocking-server/slowpoetry.py --port 10000 poetry/ecstasy.txt
+
+`netcat <http://netcat.sourceforge.net/>`_ [*]_ プログラムを使える場合は次のようにテストできます。
+::
+
+    netcat localhost 10000
+
+.. [*] 訳注: コマンド名が ``netcat`` ではなく ``nc`` の処理系もあるかもしれません。
+
+サーバが動作していれば、詩が画面にゆっくりと流れてくるでしょう。スゴイ！(訳注：Ecstasy! と掛けてるから英語だとおもしろい、というジョーク) また、サーバがバイトを送出するごとに一行ずつ出力していることに気付くでしょう。完全に詩を送りきってしまうと、サーバは接続を切断します。
+
+デフォルトでは、サーバは自分のマシンの「ループバック」インターフェイスを listen しているだけです。もし別のマシンからサーバに接続したい場合は、 ``--iface`` オプションで listen するインターフェイスを指定できます。
+
+サーバがそれぞれの詩をゆっくりと送り出すだけでなく、ソースコードを読むと、サーバがあるクライアントに詩を送っている間は他の全てのクライアントはそのクライアントに詩を送りきるまで待たなくてはならないことがお分かりでしょうか。本当にのんびりとしたサーバですので、学習用以外には特に役立たないでしょう。
+
+    **ホントでしょうか？**
+    他方で、 `Peak Oil <http://www.peakoil.net/>`_ のもっと悲観的な人たちが正しく、実世界は世界的なエネルギー危機と地球温暖化に向かっているとすれば、
+    遠からぬ未来にはたぶん、帯域を食わず低電力の poetry server が私たちに必要なものになるかもしれません。
+    想像してみてください。長らく、自分が満足するような庭の手入れに精を出し、自分自身の洋服をつくり、地域の自治会に奉仕し、
+    世紀末後の荒廃した状態を転々とする非常にデリケートな無気力人間 (訳注：zombie。ウィルスに感染したコンピュータのことかもしれないし、得体の知れないものかも) を撃退しながら過ごしてきた後に、
+    あなたの発生器 (訳注：詩を送り出すサーバのこと) を開始して、消失してしまった文明から高度な文化の数行をダウンロードできるかもしれません。このときこそが私たちのちっぽけなサーバがその意義を発揮するときなのです。
+
+ブロッキングクライアント
+------------------------
+コード例には複数のサーバから次々に詩を取得できるブロッキングクライアントもあります。パート１の":ref:`figure1`"で示したように、クライアントに三つのタスクを実行させてみましょう。まずは三つのサーバを実行させ、別々の詩を送り出させます。三つの別々のターミナルウィンドウでこれらのコマンドを実行してください。
+::
+
+    python blocking-server/slowpoetry.py --port 10000 poetry/ecstasy.txt --num-bytes 30
+    python blocking-server/slowpoetry.py --port 10001 poetry/fascination.txt
+    python blocking-server/slowpoetry.py --port 10002 poetry/science.txt
+
+あなたのシステムで上記のポート番号がすでに使われているようなら違うポート番号にしても構いません。最初のサーバはデフォルトの 10 バイトではなく 30 バイトずつにしていることに注意してください。この詩は他のに比べて三倍くらいの長さがあるからです。こうしておくと、だいたい同じくらいのタイミングで終わるようになります。
+
+それでは、詩を取得するために `blocking-client/get-poetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/blocking-client/get-poetry.py>`_ のブロッキングクライアントを使いましょう。次のようにしてクライアントを実行します。
+::
+
+    python blocking-client/get-poetry.py 10000 10001 10002
+
+サーバの設定に合わせてポート番号を変えてください。これはブロッキングクライアントなので、完全な詩を受け取るまで待ち、次の詩が始めるのを待ちながら、それぞれのポート番号から交互に詩をダウンロードするでしょう。詩を出力する代わりに、ブロッキングクライアントは以下の出力を生成します。
+::
+
+    Task 1: get poetry from: 127.0.0.1:10000
+    Task 1: got 3003 bytes of poetry from 127.0.0.1:10000 in 0:00:10.126361
+    Task 2: get poetry from: 127.0.0.1:10001
+    Task 2: got 623 bytes of poetry from 127.0.0.1:10001 in 0:00:06.321777
+    Task 3: get poetry from: 127.0.0.1:10002
+    Task 3: got 653 bytes of poetry from 127.0.0.1:10002 in 0:00:06.617523
+    Got 3 poems in 0:00:23.065661
+
+基本的にこれは":ref:`figure1`"のテキスト版で、それぞれのタスクはひとつの詩をダウンロードすることです。あなたの環境ではちょっと違うかもしれませんし、サーバのタイミングパラメータを変更すれば変わってくるでしょう。パラメータを変更してみて、ダウンロード時間への影響を確認してみてください。
+
+ブロッキングサーバとクライアントのソースコードに目を通して、ネットワークデータを送受信する部分がソースコードのどの辺にあるは分かったでしょうか。
+
+非同期クライアント
+------------------
+それでは、Twisted を使わないで書いた簡単な非同期クライアントを見ていきましょう。とりあえず動かしてみましょう。さっきと同じポートで三つのサーバが動作しているものとします。先ほど起動したものが動いていればそのままにしておいてください。非同期クライアント (`async-client/get-poetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/async-client/get-poetry.py>`_ にあります) は次のようにして実行します。
+::
+
+    python async-client/get-poetry.py 10000 10001 10002
+
+こんな感じの出力になるでしょう。
+::
+
+    Task 1: got 30 bytes of poetry from 127.0.0.1:10000
+    Task 2: got 10 bytes of poetry from 127.0.0.1:10001
+    Task 3: got 10 bytes of poetry from 127.0.0.1:10002
+    Task 1: got 30 bytes of poetry from 127.0.0.1:10000
+    Task 2: got 10 bytes of poetry from 127.0.0.1:10001
+    ...
+    Task 1: 3003 bytes of poetry
+    Task 2: 623 bytes of poetry
+    Task 3: 653 bytes of poetry
+    Got 3 poems in 0:00:10.133169
+
+今回は出力がちょっと長くなっています。非同期クライアントはサーバからダウンロードするごとに一行を出力しており、のんびりした詩のサーバはちょっとずつバイト列を送り出しているためです。パート１の":ref:`figure3`"のように、個別のタスクが一緒くたにまとめられていることに注意してください。
+
+どうやって非同期クライアントが、速いサーバに遅れないままで、遅いサーバのスピードに自動的に合わせるのかを確認するために、サーバの遅延設定を変えて (たとえば、あるサーバを他のサーバより遅くしてみる、とか) みてください。これこそが非同期の醍醐味です。
+
+全ての詩を取得するのに (上記のサーバ設定の場合は)、非同期クライアントは 10 秒くらいで終了するのに、同期クライアントは 23 秒くらいかかることにも注意してください。パート１の":ref:`figure3`"と":ref:`figure4`"の違いを思い出してください。ブロックする時間があまりありませんので、非同期クライアントは全体として短い時間で全ての詩をダウンロードできるのです。確かに、非同期クライアントでもブロックは発生しています。ゆったりしたサーバは遅いのです。単に非同期クライアントは全てのサーバへの対応を切り替えているため、ブロッキングクライアントに比べてブロックされる時間に多くを費やさないだけです。
+
+    技術的なことを言えば、非同期クライアントはブロッキング操作を実行しています。
+    標準出力のファイルディスクリプタに ``print`` 文で書き出しています。ここの例ではこれは問題になりません。
+    ``print`` 文による出力を常に受け付けてくれる端末のローカルなマシンでは実際にはブロックしないでしょうし、サーバの遅さに比べれば素早く実行されます。
+    しかし、プログラムをパイプライン処理の一部分にしてその中で非同期に処理したい場合は、標準入出力のための非同期入出力を使う必要があるでしょう。
+    Twisted はこの機能をサポートしていますが、全体を単純化しておくために ``print`` 文を使います。この先の Twisted を用いたプログラムでもそうします。
+
+もっと詳しく
+------------
+それでは、非同期クライアントのソースコードに目を通してみてください。非同期と同期での主要な違いに気をつけてください。
+
+#. 非同期クライアントは、一度にひとつのサーバに接続するのではなく、一斉に全てのサーバに接続します。
+#. ``setblocking(0)`` の呼び出しで、通信に使われるソケットオブジェクトはノンブロッキングモードになっています。
+#. `select <http://docs.python.org/library/select.html#module-select>`_ モジュールの ``select`` メソッドを使うことで、ソケットがなんらかのデータを受け取れるようになるまで待つようにしています。
+#. サーバからのデータを読み込むときは、ソケットがブロックするまでに読める程度しか読み込みませんし、読むべきデータのあるソケットに処理を移します (もしあれば)。これは、それぞれのサーバからその時点までに受信した詩の内容を管理し続けなくてはならないことを意味します。
+
+非同期クライアントで核となる部分は、 ``get_poetry`` 関数の最上位のループです。このループは次のステップに分解できます。
+
+#. ``select`` を使い、ひとつ以上のソケットが読むべきデータを持つようになるまで、全ての有効なソケットを待ち受けます。
+#. 読むべきデータのあるそれぞれのソケットに対して、データを読み込みます。ただし、その時に有効なだけのデータしか読み込みません。 `ブロックしてはいけません <http://en.wikipedia.org/wiki/Asynchronous_I/O>`_ 。
+#. 全てのソケットが閉じられるまで繰り返します。
+
+同期クライアントにも (``main`` 関数の中に) ループはありましたが、それぞれの繰り返し処理の中でひとつの詩を完全にダウンロードしていました。非同期クライアントにおける繰り返し処理では部分的にしかダウンロードしません。そして、ある繰り返し処理においてどの詩を扱っているか、どのくらいのデータ量を受信するかは分かりません。これらはすべてサーバの相対的なスピードとネットワークの状態にかかっています。どのソケットに対して処理するかを ``select`` に教えてもらい、ブロックしないようにそれぞれのソケットからデータを読み込むようにする外ありません。
+
+同期クライアントがいつも決まった数のサーバ (たとえば三つ) と通信しているならば、外側のループは全くいらなくなり、 ``get_poetry`` 関数を順番に三回呼び出すだけでよくなります。しかし、非同期クライアントでは外側のループをなくすことはできません。非同期の良さを活かすために、全てのソケットを待ち受け、その時々の繰り返し処理で読み込めるだけのデータに対して処理を進めなくてはなりません。
+
+イベントが発生するのを待ち受けそれを処理するループの使い方は、いわゆるデザインパターンにおける `reactor pattern <http://en.wikipedia.org/wiki/Reactor_pattern>`_ です。次の図５のように表せます。
+
+.. _figure5:
+
+.. figure:: images/p02_reactor-1.png
+
+   図５：同期モデル
+
+イベントを待って処理を行うので、ループは「reactor」です。イベントループともいわれます。reactive system は入出力を待つことが多いため、こうしたループは `select loops <http://en.wikipedia.org/wiki/Asynchronous_I/O#Select.28.2Fpoll.29_loops>`_ とも呼ばれます。 ``select`` の呼び出しは入出力を待つために使われるからです。 ``select`` ループの中では、「イベント」とはソケットが読み込みか書き込みができるようになったときです。入出力を待ち受ける方法は ``select`` だけではないことに注意してください。単に古くからある方法 (それゆえに広く利用可能) というだけです。異なるオペレーティングシステムで利用可能で、 ``select`` と同じことができて (願わくば) よりよい性能をもたらしてくれる新しい API もいくつかあります。しかし、性能のことに目をつむればどれでも同じことです。ソケットの集合 (実際はファイルディスクリプタ) を受け取って、ひとつ以上が入出力の準備ができるまでブロックするのです。
+
+    ``select`` やその類を使って、ブロックせずにファイルディスクリプタの集合が入出力の準備ができているかを単に確かめることもできます。
+    この機能は reactive system がループの中で入出力を持たずに動作できるようにしてくれます。
+    しかし、reactive systems では全ての処理が入出力に抑制されてしまう場合がしばしばありますので、全てのファイルディスクリプタをブロックすることで CPU 資源を節約できます。
+
+厳密な言い方をすれば、ここで示した非同期クライアントでのループは reactor pattern ではありません。ループのロジックが詩のサーバに特有である「ビジネスロジック」と分離されていないためです。全部ごっちゃになっています。reactor pattern の現実的な実装では、ループを次の機能を持つ抽象的なものに分けることになるでしょう。
+
+#. 入出力を監視したいファイルディスクリプタの集合を受け取ります。
+#. ファイルディスクリプタが入出力の準備ができたことを繰り返し知らせます。
+
+そして、本当に良い reactor pattern の実装は次のような機能も持つでしょう。
+
+#. 異なるシステムで出現する全てのおかしな場合を扱います。
+#. reactor を最低限の努力で使えるようにしてくれる多くの嬉しい抽象化を提供します。
+#. 自由な発想で使える、よく知られたプロトコルの実装を提供します。
+
+これがまさに Twisted です。堅牢でクロスプラットフォームな Reactor Pattern およびそれ以上のたくさんのものの実装です。":doc:`p03`"では、Twisted 版の Get Poetry Now に向けて単純な Twisted のプラグラムをいくつか書いていきます。
+
+おすすめの練習問題
+------------------
+
+#. サーバの数や設定を変えて、ブロッキングの非同期クライアントでいくつかのタイミングを実験してみること。
+#. 非同期クライアントで詩の内容を返すような ``get_poetry`` 関数を提供できるでしょうか？理由は？
+#. 非同期クライアントで似たような方法で (それでも非同期に) 動く ``get_poetry`` 関数を欲しくなったときに、引数と戻り値はどのようなものになるでしょうか？
+
+..
+    <H2>Part 2: Slow Poetry and the Apocalypse
+    This continues the introduction started <A href="http://krondo.com/blog/?p=1209">here</A>. And if you read it, welcome back. Now we're going to get our hands dirty and write some code. But first, let's get some assumptions out of the way.
+    <H3>My Assumptions About You
+    I will proceed as if you have a basic working knowledge of writing synchronous programs in Python, and know at least a little bit about Python socket programming. If you have never used sockets before, you might read the <A href="http://docs.python.org/library/socket.html#module-socket">socket module documentation</A> now, especially the example code towards the end. If you've never used Python before, then the rest of this introduction is probably going to be rather opaque.
+    <H3>My Assumptions About Your Computer
+    My experience with Twisted is mainly on Linux systems, and it is a Linux system on which I developed the examples. And while I won't intentionally make the code Linux-dependent, some of it, and some of what I say, may only apply to Linux and other UNIX-like systems (like Mac OSX or FreeBSD). Windows is a strange, murky place and, if you are hacking in it, I can't offer you much more beyond my heartfelt sympathies.
+    I will assume you have installed relatively recent versions of <A href="http://python.org/download">Python</A> and <A href="http://twistedmatrix.com/trac/wiki/Downloads">Twisted</A>. The examples were developed with Python 2.5 and Twisted 8.2.0.
+    Also, you can run all the examples on a single computer, although you can configure them to run on a network of systems as well. But for learning the basic mechanics of asynchronous programming, a single computer will do fine.
+    <H3>Getting the example code
+    The example code is available as a <A href="http://github.com/jdavisp3/twisted-intro/zipball/master">zip</A> or <A href="http://github.com/jdavisp3/twisted-intro/tarball/master">tar</A> file or as a <A href="git://github.com/jdavisp3/twisted-intro.git">clone</A> of my <A href="http://github.com/jdavisp3/twisted-intro/tree/master">public git repository</A>. If you can use <A href="http://git-scm.com/">git</A> or another version control system that can read git repositories, then I recommend using that method as I will update the examples over time and it will be easier for you to stay current. As a bonus, it includes the SVG source files used to generate the figures. Here is the git command to clone the repository:
+    git clone git://github.com/jdavisp3/twisted-intro.git
+    The rest of this tutorial will assume you have the latest copy of the example code and you have multiple shells open in its top-level directory (the one with the README file).
+    <H3>Slow Poetry
+    Although CPUs are much faster than networks, most networks are still a lot faster than your brain, or at least faster than your eyeballs. So it can be challenging to get the "cpu's-eye-view" of network latency, especially when there's only one machine and the bytes are whizzing past at full speed on the <A href="http://en.wikipedia.org/wiki/Loopback">loopback interface</A>. What we need is a slow server, one with artificial delays we can vary to see the effect. And since servers have to serve something, ours will serve poetry. The example code includes a sub-directory called "<TT>poetry</TT>" with one poem each by <A href="http://en.wikipedia.org/wiki/Donne">John Donne</A>, <A href="http://en.wikipedia.org/wiki/Yeats">W.B. Yeats</A>, and <A href="http://en.wikipedia.org/wiki/Poe">Edgar Allen Poe</A>. Of course, you are free to substitute your own poems for the server to dish up.
+    The basic slow poetry server is implemented in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/blocking-server/slowpoetry.py">blocking-server/slowpoetry.py</A>. You can run one instance of the server like this:
+    python blocking-server/slowpoetry.py poetry/ecstasy.txt
+    That command will start up the blocking server with John Donne's poem "Ecstasy" as the poem to serve. Go ahead and look at the source code to the blocking server now. As you can see, it does not use Twisted, only basic Python socket operations. It also sends a limited number of bytes at a time, with a fixed time delay between them. By default, it sends 10 bytes every 0.1 seconds, but you can change these parameters with the –num-bytes and –delay command line options. For example, to send 50 bytes every 5 seconds:
+    python blocking-server/slowpoetry.py --num-bytes 50 --delay 5 poetry/ecstasy.txt
+    When the server starts up it prints out the port number it is listening on. By default, this is a random port that happens to be available on your machine. When you start varying the settings, you will probably want to use the same port number over again so you don't have to adjust the client command. You can specify a particular port like this:
+    python blocking-server/slowpoetry.py --port 10000 poetry/ecstasy.txt
+    If you have the <A href="http://netcat.sourceforge.net/">netcat</A> program available, you could test the above command like this:
+    netcat localhost 10000
+    If the server is working, you will see the poem slowly crawl its way down your screen. Ecstasy! You will also notice the server prints out a line each time it sends some bytes. Once the complete poem has been sent, the server closes the connection.
+    By default, the server only listens on the local "loopback" interface. If you want to access the server from another machine, you can specify the interface to listen on with the –iface option.
+    Not only does the server send each poem slowly, if you read the code you will find that while the server is sending poetry to one client, all other clients must wait for it to finish before getting even the first line. It is truly a slow server, and not much use except as a learning device.
+    <H5 style="padding-left: 30px;">Or is it?
+    <P style="padding-left: 30px;">On the other hand, if the more pessimistic of the <A href="http://www.peakoil.net/">Peak Oil</A> folks are right and our world is heading for a global energy crisis and planet-wide societal meltdown, then perhaps one day soon a low-bandwidth, low-power poetry server could be just what we need. Imagine, after a long day of tending your self-sufficient gardens, making your own clothing, serving on your commune's Central Organizing Committee, and fighting off the radioactive zombies that roam the post-apocalyptic wastelands, you could crank up your generator and download a few lines of high culture from a vanished civilization. That's when our little server will really come into its own.
+    <H3>The Blocking Client
+    Also in the example code is a blocking client which can download poems from multiple servers, one after another. Let's give our client three tasks to perform, as in <A href="http://dpeticol.webfactional.com/blog/?p=1209#figure1">Figure 1</A> from Part 1. First we'll start three servers, serving three different poems. Run these commands in three different terminal windows:
+    python blocking-server/slowpoetry.py --port 10000 poetry/ecstasy.txt --num-bytes 30
+    python blocking-server/slowpoetry.py --port 10001 poetry/fascination.txt
+    python blocking-server/slowpoetry.py --port 10002 poetry/science.txt
+    You can choose different port numbers if one or more of the ones I chose above are already being used on your system. Note I told the first server to use chunks of 30 bytes instead of the default 10 since that poem is about three times as long as the others. That way they all finish around the same time.
+    Now we can use the blocking client in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/blocking-client/get-poetry.py"><TT>blocking-client/get-poetry.py</TT></A> to grab some poetry. Run the client like this:
+    python blocking-client/get-poetry.py 10000 10001 10002
+    Change the port numbers here, too, if you used different ones for your servers. Since this is the blocking client, it will download one poem from each port number in turn, waiting until a complete poem is received until starting the next. Instead of printing out the poems, the blocking client produces output like this:
+    Task 1: get poetry from: 127.0.0.1:10000
+    Task 1: got 3003 bytes of poetry from 127.0.0.1:10000 in 0:00:10.126361
+    Task 2: get poetry from: 127.0.0.1:10001
+    Task 2: got 623 bytes of poetry from 127.0.0.1:10001 in 0:00:06.321777
+    Task 3: get poetry from: 127.0.0.1:10002
+    Task 3: got 653 bytes of poetry from 127.0.0.1:10002 in 0:00:06.617523
+    Got 3 poems in 0:00:23.065661
+    This is basically a text version of <A href="http://dpeticol.webfactional.com/blog/?p=1209#figure1">Figure 1</A>, where each task is downloading a single poem. Your times may be a little different, and will vary as you change the timing parameters of the servers. Try changing those parameters to see the effect on the download times.
+    You might take a look at the source code to the blocking server and client now, and locate the points in the code where each blocks while sending or receiving network data.
+    <H3>The Asynchronous Client
+    Now let's take a look at a simple asynchronous client written without Twisted. First let's run it. Get a set of three servers going on the same ports like we did above. If the ones you ran earlier are still going, you can just use them again. Now we can run the asynchronous client, located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/async-client/get-poetry.py"><TT>async-client/get-poetry.py</TT></A>, like this:
+    python async-client/get-poetry.py 10000 10001 10002
+    And you should get some output like this:
+    Task 1: got 30 bytes of poetry from 127.0.0.1:10000
+    Task 2: got 10 bytes of poetry from 127.0.0.1:10001
+    Task 3: got 10 bytes of poetry from 127.0.0.1:10002
+    Task 1: got 30 bytes of poetry from 127.0.0.1:10000
+    Task 2: got 10 bytes of poetry from 127.0.0.1:10001
+    ...
+    Task 1: 3003 bytes of poetry
+    Task 2: 623 bytes of poetry
+    Task 3: 653 bytes of poetry
+    Got 3 poems in 0:00:10.133169
+    This time the output is much longer because the asynchronous client prints a line each time it downloads some bytes from any server, and these slow poetry servers just dribble out the bytes little by little. Notice that the individual tasks are mixed together just like in <A href="http://dpeticol.webfactional.com/blog/?p=1209#figure3">Figure 3</A> from Part 1.
+    Try varying the delay settings for the servers (e.g., by making one server slower than the others) to see how the asynchronous client automatically "adjusts" to the speed of the slower servers while still keeping up with the faster ones. That's asynchronicity in action.
+    Also notice that, for the server settings we chose above, the asynchronous client finishes in about 10 seconds while the synchronous client needs around 23 seconds to get all the poems. Now recall the differences between <A href="http://krondo.com/blog/?p=1209#figure3">Figure 3</A> and <A href="http://krondo.com/blog/?p=1209#figure4">Figure 4</A> in Part 1. By spending less time blocking, our asynchronous client can download all the poems in a shorter overall time. Now, our asynchronous client does block some of the time. Our slow server is <EM>slow</EM>.&nbsp; It's just that the asynchronous client spends a lot less time blocking than the "blocking" client does, because it can switch back and forth between all the servers.
+    <P style="padding-left: 30px;">Technically, our asynchronous client <EM>is</EM> performing a blocking operation: it's writing to the standard output file descriptor with those <CODE>print</CODE> statements! This isn't a problem for our examples. On a local machine with a terminal shell that's always willing to accept more output the <CODE>print</CODE> statements won't really block, and execute quickly relative to our slow servers. But if we wanted our program to be part of a process pipeline and still execute asynchronously, we would need to use asynchronous I/O for standard input and output, too. Twisted includes support for doing just that, but to keep things simple we're just going to use <CODE>print</CODE> statements, even in our Twisted programs.
+    <H3>A Closer Look
+    Now take a look at the source code for the asynchronous client. Notice the main differences between it and the synchronous client:
+    <OL>
+    * Instead of connecting to one server at a time, the asynchronous client connects to all the servers at once.
+    * The socket objects used for communication are placed in non-blocking mode with the call to <CODE>setblocking(0)</CODE>.
+    * The <CODE>select</CODE> method in the <A href="http://docs.python.org/library/select.html#module-select">select</A> module is used to wait (block) until any of the sockets are ready to give us some data.
+    * When reading data from the servers, we read only as much as we can until the socket would block, and then move on to the next socket with data to read (if any). This means we have to keep track of the poetry we've received from each server so far.
+    </OL>
+    The core of the asynchronous client is the top-level loop in the <CODE>get_poetry</CODE> function. This loop can be broken down into steps:
+    <OL>
+    * Wait (block) on all open sockets using <CODE>select</CODE> until one (or more) sockets has data to be read.
+    * For each socket with data to be read, read it, but only as much as is available now. <A href="http://en.wikipedia.org/wiki/Asynchronous_I/O">Don't block</A>.
+    * Repeat, until all sockets have been closed.
+    </OL>
+    The synchronous client had a loop as well (in the <CODE>main</CODE> function), but each iteration of the synchronous loop downloaded one complete poem. In one iteration of the asynchronous client we might download pieces of all the poems we are working on, or just some of them. And we don't know which ones we will work on in a given iteration, or how much data we will get from each one. That all depends on the relative speeds of the servers and the state of the network. We just let <CODE>select</CODE> tell us which ones are ready to go, and then read as much data as we can from each socket without blocking.
+    If the synchronous client always contacted a fixed number of servers (say 3), it wouldn't need an outer loop at all, it could just call its blocking <CODE>get_poetry</CODE> function three times in succession. But the asynchronous client can't do without an outer loop — to gain the benefits of asynchronicity, we need to wait on <EM>all</EM> of our sockets at once, and only process as much data as each is capable of delivering in any given iteration.
+    <P style="text-align: left;">This use of a loop which waits for events to happen, and then handles them, is so common that it has achieved the status of a design pattern: the <A href="http://en.wikipedia.org/wiki/Reactor_pattern">reactor pattern</A>. It is visualized in Figure 5 below:
+    <A name="figure5"></A>
+    <DIV id="attachment_1301" class="wp-caption aligncenter" style="width: 310px"><A href="./part2_files/reactor-1.png"><IMG class="size-full wp-image-1301" title="Figure 5: the reactor loop" src="./part2_files/reactor-1.png" alt="Figure 5: the reactor loop" width="300" height="366"></A><P class="wp-caption-text">Figure 5: the reactor loop</DIV>
+    <P style="text-align: center;">
+    <P style="text-align: left;">The loop is a "reactor" because it waits for and then reacts to events. For that reason it is also known as an <EM>event loop</EM>. And since reactive systems are often waiting on I/O, these loops are also sometimes called <A href="http://en.wikipedia.org/wiki/Asynchronous_I/O#Select.28.2Fpoll.29_loops"><EM>select loops</EM></A>, since the select call is used to wait for I/O. So in a <CODE>select</CODE> loop, an "event" is when a socket becomes available for reading or writing. Note that <CODE>select</CODE> is not the only way to wait for I/O, it is just one of the oldest methods (and thus widely available). There are several newer APIs, available on different operating systems, that do the same thing as <CODE>select</CODE> but offer (hopefully) better performance. But leaving aside performance, they all do the same thing: take a set of sockets (really file descriptors) and block until one or more of them is ready to do I/O.
+    <P style="text-align: left; padding-left: 30px;">Note that it's possible to use <CODE>select</CODE> and its brethren to simply check whether a set of file descriptors is ready for I/O without blocking. This feature permits a reactive system to perform non-I/O work inside the loop. But in reactive systems it is often the case that all work is I/O-bound, and thus blocking on all file descriptors conserves CPU resources.
+    <P style="text-align: left;">Strictly speaking, the loop in our asynchronous client is not the reactor pattern because the loop logic is not implemented separately from the "business logic" that is specific to the poetry servers. They are all just mixed together. A real implementation of the reactor pattern would implement the loop as a separate abstraction with the ability to:
+    <OL>
+    * Accept a set of file descriptors you are interested in performing I/O with.
+    * Tell you, repeatedly, when any file descriptors are ready for I/O.
+    </OL>
+    And a really good implementation of the reactor pattern would also:
+    <OL>
+    * Handle all the weird corner cases that crop up on different systems.
+    * Provide lots of nice abstractions to help you use the reactor with the least amount of effort.
+    * Provide implementations of public protocols that you can use out of the box.
+    </OL>
+    Well that's just what Twisted is — a robust, cross-platform implementation of the Reactor Pattern with lots of extras. And in <A href="http://krondo.com/blog/?p=1333">Part 3</A> we will start writing some simple Twisted programs as we move towards a Twisted version of Get Poetry Now!.
+    <H3>Suggested Exercises
+    <OL>
+    * Do some timing experiments with the blocking and asynchronous clients by varying the number and settings of the poetry servers.
+    * Could the asynchronous client provide a <CODE>get_poetry</CODE> function that returned the text of the poem? Why not?
+    * If you wanted a <CODE>get_poetry</CODE> function in the asynchronous client that worked in an analogous way, but asynchronously, what arguments and return values might it have?
+    </OL>

@@ -1,0 +1,357 @@
+===========================
+パート13: Deferred と行こう
+===========================
+
+はじめに
+--------
+":doc:`p10`"で実装した詩のクライアント 5.1 を思い出してください。
+あのクライアントでは、詩の変換エンジンの呼び出しを含むコールバックチェーン (:ref:`figure27`) を管理するために ``Deferred`` を使いました。
+`client 5.1`_ では、エンジンはクライアント自身のコード内に同期関数として実装されていました。
+
+":doc:`p12`"で書いたようなネットワーク越しの詩の変換サービスを使う新しいクライアントを実装したいと思います。
+しかし、ちょっと待ってください。
+変換サービスにはネットワーク越しにアクセスするため、非同期入出力を使う必要があるでしょう。
+そして、変換リクエスト用の API は非同期になるでしょう。
+言い換えると、新しいクライアントでは ``try_to_cummingsify`` コールバックは ``Deferred`` を返すようになります。
+
+.. _client 5.1: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L1
+..
+    <H3>Introduction
+    Recall poetry client 5.1 from <A href="http://krondo.com/blog/?p=1956">Part 10</A>.The client used a Deferred to manage a <A href="http://krondo.com/blog/?p=1956#figure24">callback chain</A> that included a call to a poetry transformation engine. In <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L1">client 5.1</A>, the engine was implemented as a synchronous function call implemented in the client itself.
+    Now we want to make a new client that uses the networked poetry transformation service we wrote in <A href="http://krondo.com/blog/?p=2101">Part 12</A>. But here's the wrinkle: since the transformation service is accessed over the network, we'll need to use asynchronous I/O. And that means our API for requesting a transformation will have to be asynchronous, too. In other words, the <CODE>try_to_cummingsify</CODE> callback is going to return a <CODE>Deferred</CODE> in our new client.
+
+遅延オブジェクトのチェーンの途中にあるコールバックが他の遅延オブジェクトを返したらどうなるでしょうか？
+一番最初の遅延オブジェクトを「アウター」、二番目のものを「インナー」と呼ぶことにします。
+アウターにおける `N` 番目のコールバックがインナーを返すとします。
+コールバックは「自分は非同期だ。結果はまだない。」と主張します。
+チェーンの過程では、アウターは次のコールバックもしくはエラー用コールバックに結果を渡して呼び出す必要がありますので、アウターはインナーが発火されるまで待たなくてはなりません。
+もちろん、アウターが何かをブロックしてはなりませんので、その代わりに、コールバックチェーンの実行を一時停止して、reactor (またはアウターを発火させた何か) に制御を戻します。
+
+このとき、アウターが再開するタイミングをどのようにして知るのでしょうか？
+簡単です。コールバックとエラー用コールバックのペアをインナーに追加するのです。
+インナーが発火されるとき、アウターは自身のチェーンを一時停止させます。
+もしもインナーが成功したら (つまり、アウターが付け足したコールバックを呼び出したら)、アウターは `N+1` のコールバックにその結果を渡します。
+逆にインナーが失敗したら (アウターが付け足したエラー用コールバックを呼び出したら)、failure (失敗を表すオブジェクト) をエラー用コールバックに渡します。
+
+なかなか複雑ですね。図28で考えを図にしてみましょう。
+
+..
+    So what happens when a callback in a deferred's chain returns another deferred? Let's call the first deferred the 'outer' deferred and the second the 'inner' one. Suppose callback <STRONG>N</STRONG> in the outer deferred returns the inner deferred. That callback&nbsp; is saying "I'm asynchronous, my result isn't here yet". Since the outer deferred needs to call the next callback or errback in the chain with the result, the outer deferred needs to wait until the inner deferred is fired. Of course, the outer deferred can't block either, so instead the outer deferred suspends the execution of the callback chain and returns control to the reactor (or whatever fired the outer deferred).
+    And how does the outer deferred know when to resume? Simple — by adding a callback/errback pair to the inner deferred. Thus, when the inner deferred is fired the outer deferred will resume executing its chain. If the inner deferred succeeds (i.e., it calls the callback added by the outer deferred), then the outer deferred calls its <STRONG>N+1</STRONG> callback with the result. And if the inner deferred fails (calls the errback added by the outer deferred), the outer deferred calls the <STRONG>N+1</STRONG> errback with the failure.
+    That's a lot to digest, so let's illustrate the idea in Figure 28:
+
+.. _figure28:
+
+.. figure:: images/p13_deferred-111.png
+
+    図２８：外側と内側の遅延オブジェクトの処理の進み方
+
+..
+    <DIV id="attachment_2196" class="wp-caption aligncenter" style="width: 609px"><A href="./part13_files/deferred-111.png"><IMG class="size-full wp-image-2196" title="Figure 28: outer and inner deferred processing" src="./part13_files/deferred-111.png" alt="Figure 28: outer and inner deferred processing" width="599" height="511"></A><P class="wp-caption-text">Figure 28: outer and inner deferred processing</DIV>
+
+この図では、アウターは 4 層のコールバックとエラー用コールバックのペアを持ちます。
+アウターが発火すると、最初のコールバックは遅延オブジェクト (インナー) を返します。
+この時点で、アウターはチェーンの発火を停止し、制御を reactor に戻すでしょう (コールバックとエラー用コールバックのペアをインナーに追加した後に)。
+しばらくするとインナーが発火し、アウターは自身のコールバックチェーンの処理を再開します。
+アウターはインナー自体を発火させていないことに注意してください。
+アウターはインナーの結果がいつになったら有効になるか、もしくはどのような結果になるかを知りえないので、そのようなことは不可能でしょう。
+むしろ、アウターはインナーが発火されるのを単純に (非同期に) 待ちます。
+
+図28において、インナーへ接続されているコールバックの線が、緑や赤ではなく、黒であることをよく見てください。
+コールバックが成功したか失敗したかが、インナーが発火されるまで分からないからです。
+アウターは次のコールバックを呼び出すかエラー用コールバックを呼び出すかを、自分自身のチェーンにおいてしか決められません。
+
+図29では、図28と同じアウターとインナーの遅延オブジェクトが発火していく流れを reactor の観点から図示します。
+
+..
+    In this figure the outer deferred has 4 layers of callback/errback pairs. When the outer deferred fires, the first callback in the chain returns a deferred (the inner deferred). At that point, the outer deferred will stop firing its chain and return control to the reactor (after adding a callback/errback pair to the inner deferred). Then, some time later, the inner deferred fires and the outer deferred resumes processing its callback chain. Note the outer deferred does <EM>not</EM> fire the inner deferred itself. That would be impossible, since the outer deferred cannot know when the inner deferred's result is available, or what that result might be. Rather, the outer deferred simply waits (asynchronously) for the inner deferred to fire.
+    Notice how the line connecting the callback to the inner deferred in Figure 28 is black instead of green or red. That's because we don't know whether the callback succeeded or failed until the inner deferred is fired. Only then can the outer deferred decide whether to call the next callback or the next errback in its own chain.
+    Figure 29 shows the same outer/inner deferred firing sequence in Figure 28 from the point of view of the reactor:
+
+.. _figure29:
+
+.. figure:: images/p13_deferred-12.png
+
+    図２９：図２８におけるスレッド制御
+
+..
+    <DIV id="attachment_2179" class="wp-caption aligncenter" style="width: 664px"><A href="./part13_files/deferred-12.png"><IMG class="size-full wp-image-2179" title="Figure 29: the thread of control in Figure 28" src="./part13_files/deferred-12.png" alt="Figure 29: the thread of control in Figure 28" width="654" height="582"></A><P class="wp-caption-text">Figure 29: the thread of control in Figure 28</DIV>
+
+これはおそらく ``Deferred`` クラスの最も複雑な機能ですので、身につけるまでに時間がかかっても気にしないでください。
+`twisted-deferred/defer-10.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-10.py#L1>`_
+にあるコード例を使ったもうひとつの方法で説明しましょう。
+この例はふたつのアウターを生成します。ひとつは普通のコールバックを持ち、もうひとつはインナーを返すコールバックを持ちます。
+コードと出力をじっくり見ると、インナーが返されると二つ目のアウターがチェーンを止めて、インナーが発火されると再び開始されることが分かるでしょう。
+
+..
+    This is probably the most complicated feature of the <CODE>Deferred</CODE> class, so don't worry if you need some time to absorb it. We'll illustrate it one more way using the example code in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-10.py#L1"><TT>twisted-deferred/defer-10.py</TT></A>. That example creates two outer deferreds, one with plain callbacks, and one where a single callback returns an inner deferred. By studying the code and the output you can see how the second outer deferred stops running its chain when the inner deferred is returned, and then starts up again when the inner deferred is fired.
+
+クライアント 6.0
+================
+入れ子になった遅延オブジェクトという新しい知識を使って、パート12でやったようなネットワーク越しの変換サービスを使う詩のクライアントを実装し直してみましょう。
+`twisted-client-6/get-poetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L1>`_ にコードがあります。
+詩のプロトコルとファクトリは前回のバージョンと変わりません。
+しかし、今は変換リクエストを生成するためのプロトコルとファクトリがあります。
+変換クライアントの `プロトコル <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L85>`_ は次のようになります。
+::
+
+    class TransformClientProtocol(NetstringReceiver):
+
+        def connectionMade(self):
+            self.sendRequest(self.factory.xform_name, self.factory.poem)
+
+        def sendRequest(self, xform_name, poem):
+            self.sendString(xform_name + '.' + poem)
+
+        def stringReceived(self, s):
+            self.transport.loseConnection()
+            self.poemReceived(s)
+
+        def poemReceived(self, poem):
+            self.factory.handlePoem(poem)
+
+..
+    <H3>Client 6.0
+    Let's use our new knowledge of nested deferreds and re-implement our poetry client to use the network transformation service from Part 12. You can find the code in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L1"><TT>twisted-client-6/get-poetry.py</TT></A>. The poetry Protocol and Factory are unchanged from the previous version. But now we have a Protocol and Factory for making transformation requests. Here's the transform client <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L85">Protocol</A>:
+    class TransformClientProtocol(NetstringReceiver):
+
+        def connectionMade(self):
+            self.sendRequest(self.factory.xform_name, self.factory.poem)
+
+        def sendRequest(self, xform_name, poem):
+            self.sendString(xform_name + '.' + poem)
+
+        def stringReceived(self, s):
+            self.transport.loseConnection()
+            self.poemReceived(s)
+
+        def poemReceived(self, poem):
+            self.factory.handlePoem(poem)
+
+基底クラスとして NetstringReceiver を使うと、この実装は非常に簡単になります。
+接続が確立されるとすぐにサーバに変換リクエストを送信し、ファクトリから変換名と詩を取得します。
+詩を受け取ると、処理するためにファクトリへ渡します。
+`ファクトリ <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L101>`_ のコードは次のようになります。
+::
+
+    class TransformClientFactory(ClientFactory):
+
+        protocol = TransformClientProtocol
+
+        def __init__(self, xform_name, poem):
+            self.xform_name = xform_name
+            self.poem = poem
+            self.deferred = defer.Deferred()
+
+        def handlePoem(self, poem):
+            d, self.deferred = self.deferred, None
+            d.callback(poem)
+
+        def clientConnectionLost(self, _, reason):
+            if self.deferred is not None:
+                d, self.deferred = self.deferred, None
+                d.errback(reason)
+
+        clientConnectionFailed = clientConnectionLost
+
+..
+    Using the NetstringReceiver as a base class makes this implementation pretty simple. As soon as the connection is established we send the transform request to the server, retrieving the name of the transform and the poem from our factory. And when we get the poem back, we pass it on to the factory for processing. Here's the code for the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L101">Factory</A>:
+    class TransformClientFactory(ClientFactory):
+
+        protocol = TransformClientProtocol
+
+        def __init__(self, xform_name, poem):
+            self.xform_name = xform_name
+            self.poem = poem
+            self.deferred = defer.Deferred()
+
+        def handlePoem(self, poem):
+            d, self.deferred = self.deferred, None
+            d.callback(poem)
+
+        def clientConnectionLost(self, _, reason):
+            if self.deferred is not None:
+                d, self.deferred = self.deferred, None
+                d.errback(reason)
+
+        clientConnectionFailed = clientConnectionLost
+
+このファクトリはクライアント向けに設計されていて、プロトコルが使う変換名と詩を保存することによって、単一の変換リクエストを処理します。
+ファクトリは変換リクエストの結果を表す遅延オブジェクトを生成します。
+ファクトリがふたつのエラーの場合を扱う方法に注意してください。
+接続に失敗した場合と、詩を受け取る前に接続が閉じられてしまった場合です。
+詩を受け取っても ``clientConnectionLost`` メソッドは呼び出されます。
+しかし、この場合は ``handlePoem`` メソッドのおかげで ``self.deferred`` は ``None`` になります。
+
+ファクトリクラスは自分自身も発火させる遅延オブジェクトを生成します。
+これは Twisted プログラミングにおいて守るべき良い決まりごとです。注目しておきましょう。
+
+    一般に、遅延オブジェクトを生成するオブジェクトは、その遅延オブジェクトを発火させることに責任を負うべきです。
+
+「あなたが作ったらあなたが発火させてください」という決まりごとは、ある遅延オブジェクトが一回しか発火されないことを保証してくれて、Twisted プログラムの制御フローを簡単にしてくれます。
+
+変換ファクトリに加えて、特定の変換サーバへの TCP 接続を隠蔽してくれる `Proxy <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L122>`_ クラスもあります。
+
+::
+
+    class TransformProxy(object):
+        """
+        I proxy requests to a transformation service.
+        """
+
+        def __init__(self, host, port):
+            self.host = host
+            self.port = port
+
+        def xform(self, xform_name, poem):
+            factory = TransformClientFactory(xform_name, poem)
+            from twisted.internet import reactor
+            reactor.connectTCP(self.host, self.port, factory)
+            return factory.deferred
+
+..
+    This factory is designed for clients and handles a single transformation request, storing both the transform name and the poem for use by the Protocol. The Factory creates a single Deferred which represents the result of the transformation request. Notice how the Factory handles two error cases: a failure to connect and a connection that is closed before the poem is received. Also note the <CODE>clientConnectionLost</CODE> method is called even if we receive the poem, but in that case <CODE>self.deferred</CODE> will be <CODE>None</CODE>, thanks to the <CODE>handlePoem</CODE> method.
+    This Factory class creates the Deferred that it also fires. That's a good rule to follow in Twisted programming, so let's highlight it:
+    <P style="padding-left: 30px;">In general, an object that makes a Deferred should also be in charge of firing that Deferred.
+    This "you make it, you fire it" rule helps ensure a given deferred is only fired once and makes it easier to follow the flow of control in a Twisted program.
+    In addition to the transform Factory, there is also a <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L122">Proxy</A> class which hides the details of making the TCP connection to a particular transform server:
+    class TransformProxy(object):
+        """
+        I proxy requests to a transformation service.
+        """
+
+        def __init__(self, host, port):
+            self.host = host
+            self.port = port
+
+        def xform(self, xform_name, poem):
+            factory = TransformClientFactory(xform_name, poem)
+            from twisted.internet import reactor
+            reactor.connectTCP(self.host, self.port, factory)
+            return factory.deferred
+
+このクラスは、他のコードでも変換リクエストに使えるような、単一の ``xform()`` インターフェイスを表します。
+このため、ホスト名とポート番号に煩わされることなく変換の要求を出して、遅延オブジェクトを受け取ることができます。
+
+`try_to_cummingsify <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L163>`_
+コールバックを除いて、プログラムの残りの部分は変わりません。
+::
+
+    def try_to_cummingsify(poem):
+        d = proxy.xform('cummingsify', poem)
+        
+        def fail(err):
+            print &gt;&gt;sys.stderr, 'Cummingsify failed!'
+            return poem
+        
+        return d.addErrback(fail)
+
+..
+    This class presents a single <CODE>xform()</CODE> interface that other code can use to request transformations. So that other code can just request a transform and get a deferred back without mucking around with hostnames and port numbers.
+    The rest of the program is unchanged except for the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L163"><CODE>try_to_cummingsify</CODE></A> callback:
+    def try_to_cummingsify(poem):
+            d = proxy.xform('cummingsify', poem)
+
+            def fail(err):
+                print &gt;&gt;sys.stderr, 'Cummingsify failed!'
+                return poem
+
+            return d.addErrback(fail)
+
+このコールバックは遅延オブジェクトを返します。しかし、Proxy インスタンスを生成することを除けば ``main`` 関数の残りの部分を変更する必要はありません。
+``try_to_cummingsify`` は遅延オブジェクトのチェーン (``get_poetry`` で返される遅延オブジェクトです) の一部ですので、
+すでに非同期に使われていて、何も変更する必要がありません。
+
+``d.addErrback(fail)`` の結果を返していることに気をつけてください。
+これはちょっとした構文糖衣です。
+``addCallback`` と ``addErrback`` メソッドは元の遅延オブジェクトを返します。
+次のように記述した方が良さそうですね。
+::
+
+        d.addErrback(fail)
+        return d
+
+..
+    This callback now returns a deferred, but we didn't have to change the rest of the <CODE>main</CODE> function at all, other than to create the Proxy instance. Since <CODE>try_to_cummingsify</CODE> was part of a deferred chain (the deferred returned by <CODE>get_poetry</CODE>), it was already being used asynchronously and nothing else need change.
+    You'll note we are returning the result of <CODE>d.addErrback(fail)</CODE>. That's just a little bit of syntactic sugar. The <CODE>addCallback</CODE> and <CODE>addErrback</CODE> methods return the original deferred. We might just as well have written:
+            d.addErrback(fail)
+            return d
+
+最初のバージョンと同じことですが、ちょっと短くなりましたね。
+
+..
+    The first version is the same thing, just shorter.
+
+クライアントをテストしてみる
+----------------------------
+新しいクライアントは以前のものたちとはやや異なる構文を持ちます。
+10001番ポートで変換サービスを起動していて、ふたつの詩のサーバが10002番ポートと10003番ポートで動いているならば、次のように実行できます。
+::
+
+    python twisted-client-6/get-poetry.py 10001 10002 10003
+
+..
+    <H4>Testing out the Client
+    The new client has a slightly different syntax than the others. If you have a transformation service running on port 10001 and two poetry servers running on ports 10002 and 10003, you would run:
+    python twisted-client-6/get-poetry.py 10001 10002 10003
+
+ふたつの詩をダウンロードして両方ともを変換するためには、変換サーバを次のように起動しましょう。
+::
+
+    python twisted-server-1/tranformedpoetry.py --port 10001
+
+..
+    To download two poems and transform them both. You can start the transform server like this:
+    python twisted-server-1/tranformedpoetry.py --port 10001
+
+詩のサーバはこんな感じです。
+::
+
+    python twisted-server-1/fastpoetry.py --port 10002 poetry/fascination.txt
+    python twisted-server-1/fastpoetry.py --port 10003 poetry/science.txt
+
+..
+    And the poetry servers like this:
+    python twisted-server-1/fastpoetry.py --port 10002 poetry/fascination.txt
+    python twisted-server-1/fastpoetry.py --port 10003 poetry/science.txt
+
+これで詩のクライアントを上記のように実行できます。
+変換サーバをクラッシュさせてみて、同じコマンドでクライアントを再度実行してみましょう。
+
+..
+    Then you can run the poetry client as above. After that, try crashing the transform server and re-running the client with the same command.
+
+
+まとめましょう
+==============
+このパートでは、遅延オブジェクトがコールバックチェーンの途中で透過的に他の遅延オブジェクトを扱う方法を学びました。
+このため、私たちは詳しいことを気にせず安全に非同期のコールバックを「アウター」に付け足すことができます。
+私たちの関数の多くが非同期になりますので、とてもお手軽です。
+
+これで遅延オブジェクトに関しては全てを理解したのでしょうか？
+とんでもない！
+話しておくべき重要な機能がもうひとつあります。とはいえ、これは":doc:`p14`"にとっておきましょう。
+
+..
+    <H3>Wrapping Up
+    In this Part we learned how deferreds can transparently handle other deferreds in a callback chain, and thus we can safely add asynchronous callbacks to an 'outer' deferred without worrying about the details. That's pretty handy since lots of our functions are going to end up being asynchronous.
+    Do we know everything there is to know about deferreds yet? Not quite! There's one more important feature to talk about, but we'll save it for <A href="http://krondo.com/blog/?p=2205">Part 14</A>.
+
+おすすめの練習問題
+==================
+1. 名前によって特定の種類の変換をお願いできるようにクライアントを修正しましょう。
+2. 変換サーバのアドレスがオプション引数になるようにクライアントを修正しましょう。引数がなければ変換ステップを飛ばします。
+3. `PoetryClientFactory <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L67>`_ が現在は「自分で作ったら自分で開始させて」という遅延オブジェクトの決まりごとを破っています。これを改めるように ``get_poetry`` と ``PoetryClientFactory`` をリファクタリングしてください。
+4. 実際にお見せしていませんが、エラー用コールバックが遅延オブジェクトを返すと対称的になります。
+   このことを確認するために `twisted-deferred/defer-10.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-10.py#L1>`_ の例を修正してみてください。
+5. `Deferred <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L137>`_ の実装において、コールバックもしくはエラー用コールバックが自分とは異なる遅延オブジェクトを返す場合を扱っている箇所を見つけてください。
+
+..
+    <H3>Suggested Exercises
+    <OL>
+    * Modify the client so we can ask for a specific kind of transformation by name.
+    * Modify the client so the transformation server address is an optional argument. If it's not provided, skip the transformation step.
+    * The <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L67"><CODE>PoetryClientFactory</CODE></A> currently violates the "you make it, you fire it" rule for deferreds. Refactor <CODE>get_poetry</CODE> and <CODE>PoetryClientFactory</CODE> to remedy that.
+    * Although we didn't demonstrate it, the case where an errback returns a deferred is symmetrical. Modify the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-10.py#L1"><TT>twisted-deferred/defer-10.py</TT></A> example to verify it.
+    * Find the place in the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L137">Deferred</A> implementation that handles the case where a callback/errback returns another Deferred.
+    </OL>

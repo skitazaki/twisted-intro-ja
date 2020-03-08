@@ -1,0 +1,253 @@
+========================
+パート15: テストされた詩
+========================
+..
+    <H2>Part 15: Tested Poetry
+
+はじめに
+========
+..
+    <H3>Introduction
+
+Twisted を探検するなかでたくさんのコードを書いてきましたが、これまではある重要なことを避けてきました。テストです。
+Python 標準の `unittest <http://docs.python.org/library/unittest.html#module-unittest>`_ パッケージのような同期フレームワークを使って
+非同期コードをテストできることを不思議に思うかもしれませんね。
+短期的な答えとしては、できません、となります。
+ここまでで分かったように、同期と非同期のコードを混在させることはできません。少なくとも普通は。
+
+幸いにも、Twisted は `trial <http://twistedmatrix.com/documents/current/core/howto/testing.html>`_
+と呼ばれる独自のテストフレームワークを持っています。
+これは非同期コードのテストをサポートしています (同期のコードにも使えます) 。
+
+ここからはあなたが `unittest <http://docs.python.org/library/unittest.html#module-unittest>`_ や似たようなテストフレームワークの基本的な仕組みに慣れていると仮定します。
+特定の親クラス (``TestCase`` のような名前です) を持つクラスを定義してテストを作成する方法です。
+"`test`" という単語から始まるそれぞれのメソッドがひとつのテストとみなされます。
+フレームワークが全てのテストを発見してくれて、オプションである ``setUp`` と ``tearDown`` ステップをはさみながら個別のテストを順番に実行してくれます。
+そして最後に結果を報告します。
+
+..
+    We've written a lot of code in our exploration of Twisted, but so far we've neglected to write something important — tests. And you may be wondering how you can test asynchronous code using a synchronous framework like the <A href="http://docs.python.org/library/unittest.html#module-unittest"><CODE>unittest</CODE></A> package that comes with Python. The short answer is you can't. As we've discovered, synchronous and asynchronous code do not mix, at least not readily.
+    Fortunately, Twisted includes its own testing framework called <A href="http://twistedmatrix.com/documents/current/core/howto/testing.html"><CODE>trial</CODE></A> that does support testing asynchronous code (and you can use it to test synchronous code, too).
+    We'll assume you are already familiar with the basic mechanics of <A href="http://docs.python.org/library/unittest.html#module-unittest"><CODE>unittest</CODE></A> and similar testing frameworks, in which you create tests by defining a class with a specific parent class (usually called something like <CODE>TestCase</CODE>), and each method of that class starting with the word "<CODE>test</CODE>" is considered a single test. The framework takes care of discovering all the tests, running them one after the other with optional&nbsp;<CODE>setUp</CODE> and <CODE>tearDown</CODE> steps, and then reporting the results.
+
+例
+==
+..
+    <H3>The Example
+
+`tests/test_poetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L1>`_ にいくつかのテスト例があります。
+すべてのテスト例が自己完結することを保証するために (`PYTHONPATH` の設定について心配する必要はありません)、必要なコードの全てをテストモジュールにコピーしておきました。
+もちろん、普通は、テストしたいモジュールをインポートすることになるでしょう。
+
+この例では、テストサーバから詩を取得するためにクライアントを使うことによって、詩のクライアントとサーバの両方をテストしています。
+テスト用に詩のサーバを提供するためには、テストケースにおいて `setUp <http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L70>`_ メソッドを実装します。
+::
+
+    class PoetryTestCase(TestCase):
+
+        def setUp(self):
+            factory = PoetryServerFactory(TEST_POEM)
+            from twisted.internet import reactor
+            self.port = reactor.listenTCP(0, factory, interface="127.0.0.1")
+            self.portnum = self.port.getHost().port
+
+..
+    You will find some example tests located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L1"><TT>tests/test_poetry.py</TT></A>. To ensure all our examples are self-contained (so you don't need to worry about <TT>PYTHONPATH</TT> settings), we have copied all the necessary code into the test module. Normally, of course, you would just import the modules you wanted to test.
+    The example is testing both the poetry client and server, by using the client to fetch a poem from a test server. To provide a poetry server for testing, we implement the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L70"><CODE>setUp</CODE></A> method in our test case:
+    class PoetryTestCase(TestCase):
+
+        def setUp(self):
+            factory = PoetryServerFactory(TEST_POEM)
+            from twisted.internet import reactor
+            self.port = reactor.listenTCP(0, factory, interface="127.0.0.1")
+            self.portnum = self.port.getHost().port
+
+``setUp`` メソッドはテスト用の詩を与えて詩のサーバを生成し、ランダムな空いているポートで待ち受けます。
+もし必要なら、実際のテストが利用できるようにそのポート番号を使わないようにします。
+もちろん、テストが終わったら `tearDown <http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L76>`_ の中でテストサーバを安全に終了させます。
+::
+
+        def tearDown(self):
+            port, self.port = self.port, None
+            return port.stopListening()
+
+..
+    The <CODE>setUp</CODE> method makes a poetry server with a test poem, and listens on a random, open port. We save the port number so the actual tests can use it, if they need to. And, of course, we clean up the test server in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L76"><CODE>tearDown</CODE></A> when the test is done:
+        def tearDown(self):
+            port, self.port = self.port, None
+            return port.stopListening()
+
+これで最初のテスト (`test_client <http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L80>`_) ができます。
+ここでは、 テストサーバから詩を取得して期待した詩であるかを検証するために `get_poetry` を使います。
+::
+
+        def test_client(self):
+            """The correct poem is returned by get_poetry."""
+            d = get_poetry('127.0.0.1', self.portnum)
+
+            def got_poem(poem):
+                self.assertEquals(poem, TEST_POEM)
+
+            d.addCallback(got_poem)
+
+            return d
+
+..
+    That brings us to our first test, <A href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L80"><CODE>test_client</CODE></A>, where we use <CODE>get_poetry</CODE> to retrieve the poem from the test server and verify it's the poem we expected:
+        def test_client(self):
+            """The correct poem is returned by get_poetry."""
+            d = get_poetry('127.0.0.1', self.portnum)
+
+            def got_poem(poem):
+                self.assertEquals(poem, TEST_POEM)
+
+            d.addCallback(got_poem)
+
+            return d
+
+ここでのテストは遅延オブジェクトを返すことに注意してください。
+`trial` を使う場合はそれぞれのテストメソッドはコールバックとして動作します。
+このことは、reactor が動いていてテストの一部として非同期操作を実行できることを意味します。
+テストが非同期であるとフレームワークに教えるだけでよく、いつもの Twisted のやりかたに沿うだけです。
+単に遅延オブジェクトを返すのです。
+
+..
+    Notice that our test function is returning a deferred. Under <TT>trial</TT>, each test method runs as a callback. That means the reactor is running and we can perform asynchronous operations as part of the test. We just need to let the framework know that our test is asynchronous and we do that in the usual Twisted way — return a deferred.
+
+`trial` フレームワークは、 ``tearDown`` メソッドを呼び出す前に遅延オブジェクトが発火するのを待ちます。
+そして、遅延オブジェクトが失敗したらテストが失敗したものとします。
+(最後のコールバックとエラー用コールバックのペアが失敗したときです。)
+遅延オブジェクトが発火するまでにあまりに長時間が経過した場合もテストは失敗とみまします。デフォルトでは２分です。
+テストが終わったということは、遅延オブジェクトが発火されたことを意味しますので、コールバックも実行され、テストメソッドである ``assertEquals`` が実行されたわけです。
+
+..
+    The <TT>trial</TT> framework will wait until the deferred fires before calling the <CODE>tearDown</CODE> method, and will fail the test if the deferred fails (i.e., if the last callback/errback pair fails). It will also fail the test if our deferred takes too long to fire, two minutes by default. And that means if the test finished, we know our deferred fired, and therefore our callback fired and ran the <CODE>assertEquals</CODE> test method.
+
+ふたつ目のテストは `test_failure <http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L91>`_ で、これは ``get_poetry`` がサーバに接続できなければ適切な方法で失敗することを検証します。
+::
+
+        def test_failure(self):
+            """The correct failure is returned by get_poetry when
+            connecting to a port with no server."""
+            d = get_poetry('127.0.0.1', -1)
+            return self.assertFailure(d, ConnectionRefusedError)
+
+..
+    Our second test, <A href="http://github.com/jdavisp3/twisted-intro/blob/master/tests/test_poetry.py#L91"><CODE>test_failure</CODE></A>, verifies that <CODE>get_poetry</CODE> fails in the appropriate way if we can't connect to the server:
+        def test_failure(self):
+            """The correct failure is returned by get_poetry when
+            connecting to a port with no server."""
+            d = get_poetry('127.0.0.1', -1)
+            return self.assertFailure(d, ConnectionRefusedError)
+
+ここでは、無効なポートに接続してみて、 `trial` が提供する ``assertFailure`` を使ってみることにします。
+このメソッドは ``assertRaises`` メソッドのようなものですが、非同期コード用です。
+ある例外を与えられたときに、ある遅延オブジェクトが失敗したら成功、そうでなければ失敗する遅延オブジェクトを返します。
+
+..
+    Here we attempt to connect to an invalid port and then use the <TT>trial</TT>-provided <CODE>assertFailure</CODE> method. This method is like the familiar <CODE>assertRaises</CODE> method but for asynchronous code. It returns a deferred that succeeds if the given deferred fails with the given exception, and fails otherwise.
+
+`trial` スクリプトを使って、次のようにしてテストを動かすことができます。
+::
+
+    trial tests/test_poetry.py
+
+それぞれのテストケースを表示しながら、いくつかの出力を確認できるでしょう。
+`OK` はテストが成功したことを意味します。
+
+..
+    You can run the tests yourself using the <TT>trial</TT> script like this:
+    trial tests/test_poetry.py
+    And you should see some output showing each test case and an <TT>OK</TT> telling you each test passed.
+
+議論
+====
+..
+    <H3>Discussion
+
+`trial` は `unittest` にとてもよく似てますので、基本的な API を使ってテストを書き始めることがとても簡単です。
+テストが非同期のコードを使うなら遅延オブジェクトを返すだけで、残りは `trial` が良きようにやってくれます。
+必要であれば、 ``setUp`` と ``tearDown`` メソッドから遅延オブジェクトを返すこともできます。
+
+..
+    Because <CODE>trial</CODE> is so similar to <CODE>unittest</CODE> when it comes to the basic API, it's pretty easy to get started writing tests. Just return a deferred if your test uses asynchronous code, and <CODE>trial</CODE> will take care of the rest. You can also return a deferred from the <CODE>setUp</CODE> and <CODE>tearDown</CODE> methods, if those need to be asynchronous as well.
+
+テストにおけるログメッセージは `trial` が自動的に作成する ``_trial_temp`` という名前のディレクトリの中のファイルに収集されるでしょう。
+画面に表示されるエラーに加えて、失敗したテストをデバッグする始めの一歩としてもログは役に立ちます。
+
+..
+    Any log messages from your tests will be collected in a file inside a directory called <TT>_trial_temp</TT> that <TT>trial</TT> will create automatically if it doesn't exist. In addition to the errors printed to the screen, the log is a useful starting point when debugging failing tests.
+
+図33はテストが実行される様子を表しています。
+
+.. _figure33:
+
+.. figure:: images/p15_test-1.png
+
+   図33： `trial` テストが実行される様子
+
+..
+    Figure 33 shows a hypothetical test run in progress:<BR>
+    <DIV id="attachment_2323" class="wp-caption aligncenter" style="width: 594px"><A href="./part15_files/test-1.png"><IMG src="./part15_files/test-1.png" alt="Figure 33: a trial test in progress" title="Figure 33: a trial test in progress" width="584" height="464" class="size-full wp-image-2323"></A><P class="wp-caption-text">Figure 33: a trial test in progress</DIV>
+
+以前に似たようなフレームワークを使ったことがあれば、テストに関係する全てのメソッドが遅延オブジェクトを返すかもしれないこと以外は見慣れたモデルでしょう。
+
+..
+    If you've used similar frameworks before, this should be a familiar model, except that all the test-related methods may return deferreds.
+
+`trial` フレームワークは、「非同期に処理が進むこと」がプログラム全体に渡って及ぼす変化をうまく表しています。
+テスト (もしくは関数でもメソッドでも) が非同期であるためには、次の条件を満たさなくてはなりません。
+
+#. ブロックしません。そして普通は、
+#. 遅延オブジェクトを返します。
+
+..
+    The <TT>trial</TT> framework is also a good illustration of how "going asynchronous" involves changes that cascade throughout the program. In order for a test (or any function or method) to be asynchronous, it must:
+    <OL>
+    * Not block and, usually,
+    * return a deferred.
+    </OL>
+
+しかしこのことは、こうした関数を呼び出すものは全て、遅延オブジェクトを受け付ける準備ができていなければなりませんし、ブロックしてはいけない (それゆえに、遅延オブジェクトを返すことになるでしょう)、ということを意味します。
+これはどんどん進んでいきます。
+したがって、 遅延オブジェクトを返す非同期なテストを扱える `trial` のようなフレームワークが必要なのです。
+
+..
+    But that means that whatever calls that function must be willing to accept a deferred, and also not block (and thus likely return a deferred as well). And so it goes up and up. Thus, the need for a framework like <TT>trial</TT> which can handle asynchronous tests that return deferreds.
+
+まとめ
+======
+..
+    <H3>Summary
+
+ユニットテストに関してはこんなところにしておきましょう。
+Twisted のコードにおいてユニットテストをどのように記述すべきかの例を探すことになったら、Twisted そのものを見るに越したことはありません。
+Twisted フレームワークには、毎回のリリース時に付け加えられている、非常に大規模なユニットテストがあります。
+これらのテストは、コードベースに受け入れられる前にコードレビューを通して Twisted の専門家によって精査されていますので、
+Twisted のコードを正しいやり方でテストする素晴らしい例となるでしょう。
+
+..
+    That's it for our look at unit testing. If would like to see more examples of how to write unit tests for Twisted code, you need look no further than Twisted itself. The Twisted framework comes with a very large suite of unit tests, with new ones added in each release. Since these tests are scrutinized by Twisted experts during code reviews before being accepted into the codebase, they make excellent examples of how to test Twisted code the right way.
+
+":doc:`p16`" では、詩のサーバをきちんとしたデーモンにするために Twisted のユーティリティを使うことにしましょう。
+
+..
+    In <A href="http://krondo.com/blog/?p=2345">Part 16</A> we will use a Twisted utility to turn our poetry server into a genuine daemon.
+
+おすすめの練習問題
+==================
+..
+    <H3>Suggested Exercises
+
+#. テストのひとつが失敗するように変更してみましょう。また、出力を確認するために `trial` をもう一度動かしてみてください。
+#. オンラインの `trial documentation <http://twistedmatrix.com/documents/current/core/howto/testing.html>`_ を読んでみましょう。
+#. この連載で作成してきた詩のサービスに対するテストを書いてみましょう。
+#. Twisted にある `テストのいくつか <http://twistedmatrix.com/trac/browser/trunk/twisted/test>`_ をのぞいてみましょう。
+
+..
+    <OL>
+    * Change one of the tests to make it fail and run <CODE>trial</CODE> again to see the output.
+    * Read the online <A href="http://twistedmatrix.com/documents/current/core/howto/testing.html">trial documentation</A>.
+    * Write tests for some of the other poetry services we have created in this series.
+    * Explore <A href="http://twistedmatrix.com/trac/browser/trunk/twisted/test">some of the tests</A> in Twisted.
+    </OL>

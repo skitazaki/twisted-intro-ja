@@ -1,0 +1,251 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート13: Deferred と行こう &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート14: Deferred が無かったら" href="p14.html" />
+    <link rel="prev" title="パート12: 詩の変換サーバー" href="p12.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート13: Deferred と行こう</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p12.html">パート12: 詩の変換サーバー</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p14.html">パート14: Deferred が無かったら</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="deferred">
+<h1>パート13: Deferred と行こう<a class="headerlink" href="#deferred" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id1">
+<h2>はじめに<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>“<a class="reference internal" href="p10.html"><span class="doc">パート10: 変換された詩</span></a>”で実装した詩のクライアント 5.1 を思い出してください。
+あのクライアントでは、詩の変換エンジンの呼び出しを含むコールバックチェーン (<a class="reference internal" href="p12.html#figure27"><span class="std std-ref">図２７：ふたつのプロトコルを持つ変換サーバ</span></a>) を管理するために <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> を使いました。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L1">client 5.1</a> では、エンジンはクライアント自身のコード内に同期関数として実装されていました。</p>
+<p>“<a class="reference internal" href="p12.html"><span class="doc">パート12: 詩の変換サーバー</span></a>”で書いたようなネットワーク越しの詩の変換サービスを使う新しいクライアントを実装したいと思います。
+しかし、ちょっと待ってください。
+変換サービスにはネットワーク越しにアクセスするため、非同期入出力を使う必要があるでしょう。
+そして、変換リクエスト用の API は非同期になるでしょう。
+言い換えると、新しいクライアントでは <code class="docutils literal notranslate"><span class="pre">try_to_cummingsify</span></code> コールバックは <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> を返すようになります。</p>
+<p>遅延オブジェクトのチェーンの途中にあるコールバックが他の遅延オブジェクトを返したらどうなるでしょうか？
+一番最初の遅延オブジェクトを「アウター」、二番目のものを「インナー」と呼ぶことにします。
+アウターにおける <cite>N</cite> 番目のコールバックがインナーを返すとします。
+コールバックは「自分は非同期だ。結果はまだない。」と主張します。
+チェーンの過程では、アウターは次のコールバックもしくはエラー用コールバックに結果を渡して呼び出す必要がありますので、アウターはインナーが発火されるまで待たなくてはなりません。
+もちろん、アウターが何かをブロックしてはなりませんので、その代わりに、コールバックチェーンの実行を一時停止して、reactor (またはアウターを発火させた何か) に制御を戻します。</p>
+<p>このとき、アウターが再開するタイミングをどのようにして知るのでしょうか？
+簡単です。コールバックとエラー用コールバックのペアをインナーに追加するのです。
+インナーが発火されるとき、アウターは自身のチェーンを一時停止させます。
+もしもインナーが成功したら (つまり、アウターが付け足したコールバックを呼び出したら)、アウターは <cite>N+1</cite> のコールバックにその結果を渡します。
+逆にインナーが失敗したら (アウターが付け足したエラー用コールバックを呼び出したら)、failure (失敗を表すオブジェクト) をエラー用コールバックに渡します。</p>
+<p>なかなか複雑ですね。図28で考えを図にしてみましょう。</p>
+<div class="figure align-default" id="id10">
+<span id="figure28"></span><img alt="_images/p13_deferred-111.png" src="_images/p13_deferred-111.png" />
+<p class="caption"><span class="caption-text">図２８：外側と内側の遅延オブジェクトの処理の進み方</span><a class="headerlink" href="#id10" title="Permalink to this image">¶</a></p>
+</div>
+<p>この図では、アウターは 4 層のコールバックとエラー用コールバックのペアを持ちます。
+アウターが発火すると、最初のコールバックは遅延オブジェクト (インナー) を返します。
+この時点で、アウターはチェーンの発火を停止し、制御を reactor に戻すでしょう (コールバックとエラー用コールバックのペアをインナーに追加した後に)。
+しばらくするとインナーが発火し、アウターは自身のコールバックチェーンの処理を再開します。
+アウターはインナー自体を発火させていないことに注意してください。
+アウターはインナーの結果がいつになったら有効になるか、もしくはどのような結果になるかを知りえないので、そのようなことは不可能でしょう。
+むしろ、アウターはインナーが発火されるのを単純に (非同期に) 待ちます。</p>
+<p>図28において、インナーへ接続されているコールバックの線が、緑や赤ではなく、黒であることをよく見てください。
+コールバックが成功したか失敗したかが、インナーが発火されるまで分からないからです。
+アウターは次のコールバックを呼び出すかエラー用コールバックを呼び出すかを、自分自身のチェーンにおいてしか決められません。</p>
+<p>図29では、図28と同じアウターとインナーの遅延オブジェクトが発火していく流れを reactor の観点から図示します。</p>
+<div class="figure align-default" id="id11">
+<span id="figure29"></span><img alt="_images/p13_deferred-12.png" src="_images/p13_deferred-12.png" />
+<p class="caption"><span class="caption-text">図２９：図２８におけるスレッド制御</span><a class="headerlink" href="#id11" title="Permalink to this image">¶</a></p>
+</div>
+<p>これはおそらく <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスの最も複雑な機能ですので、身につけるまでに時間がかかっても気にしないでください。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-10.py#L1">twisted-deferred/defer-10.py</a>
+にあるコード例を使ったもうひとつの方法で説明しましょう。
+この例はふたつのアウターを生成します。ひとつは普通のコールバックを持ち、もうひとつはインナーを返すコールバックを持ちます。
+コードと出力をじっくり見ると、インナーが返されると二つ目のアウターがチェーンを止めて、インナーが発火されると再び開始されることが分かるでしょう。</p>
+<div class="section" id="id2">
+<h3>クライアント 6.0<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h3>
+<p>入れ子になった遅延オブジェクトという新しい知識を使って、パート12でやったようなネットワーク越しの変換サービスを使う詩のクライアントを実装し直してみましょう。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L1">twisted-client-6/get-poetry.py</a> にコードがあります。
+詩のプロトコルとファクトリは前回のバージョンと変わりません。
+しかし、今は変換リクエストを生成するためのプロトコルとファクトリがあります。
+変換クライアントの <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L85">プロトコル</a> は次のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">TransformClientProtocol</span><span class="p">(</span><span class="n">NetstringReceiver</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">connectionMade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sendRequest</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">xform_name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">sendRequest</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xform_name</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sendString</span><span class="p">(</span><span class="n">xform_name</span> <span class="o">+</span> <span class="s1">&#39;.&#39;</span> <span class="o">+</span> <span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">stringReceived</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">s</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">loseConnection</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">poemReceived</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">poemReceived</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">handlePoem</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>基底クラスとして NetstringReceiver を使うと、この実装は非常に簡単になります。
+接続が確立されるとすぐにサーバに変換リクエストを送信し、ファクトリから変換名と詩を取得します。
+詩を受け取ると、処理するためにファクトリへ渡します。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L101">ファクトリ</a> のコードは次のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">TransformClientFactory</span><span class="p">(</span><span class="n">ClientFactory</span><span class="p">):</span>
+
+    <span class="n">protocol</span> <span class="o">=</span> <span class="n">TransformClientProtocol</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xform_name</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">xform_name</span> <span class="o">=</span> <span class="n">xform_name</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">poem</span> <span class="o">=</span> <span class="n">poem</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">handlePoem</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="n">d</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span><span class="p">,</span> <span class="kc">None</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">clientConnectionLost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">reason</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">d</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span><span class="p">,</span> <span class="kc">None</span>
+            <span class="n">d</span><span class="o">.</span><span class="n">errback</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span>
+
+    <span class="n">clientConnectionFailed</span> <span class="o">=</span> <span class="n">clientConnectionLost</span>
+</pre></div>
+</div>
+<p>このファクトリはクライアント向けに設計されていて、プロトコルが使う変換名と詩を保存することによって、単一の変換リクエストを処理します。
+ファクトリは変換リクエストの結果を表す遅延オブジェクトを生成します。
+ファクトリがふたつのエラーの場合を扱う方法に注意してください。
+接続に失敗した場合と、詩を受け取る前に接続が閉じられてしまった場合です。
+詩を受け取っても <code class="docutils literal notranslate"><span class="pre">clientConnectionLost</span></code> メソッドは呼び出されます。
+しかし、この場合は <code class="docutils literal notranslate"><span class="pre">handlePoem</span></code> メソッドのおかげで <code class="docutils literal notranslate"><span class="pre">self.deferred</span></code> は <code class="docutils literal notranslate"><span class="pre">None</span></code> になります。</p>
+<p>ファクトリクラスは自分自身も発火させる遅延オブジェクトを生成します。
+これは Twisted プログラミングにおいて守るべき良い決まりごとです。注目しておきましょう。</p>
+<blockquote>
+<div><p>一般に、遅延オブジェクトを生成するオブジェクトは、その遅延オブジェクトを発火させることに責任を負うべきです。</p>
+</div></blockquote>
+<p>「あなたが作ったらあなたが発火させてください」という決まりごとは、ある遅延オブジェクトが一回しか発火されないことを保証してくれて、Twisted プログラムの制御フローを簡単にしてくれます。</p>
+<p>変換ファクトリに加えて、特定の変換サーバへの TCP 接続を隠蔽してくれる <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L122">Proxy</a> クラスもあります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">TransformProxy</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    I proxy requests to a transformation service.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">host</span> <span class="o">=</span> <span class="n">host</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">port</span> <span class="o">=</span> <span class="n">port</span>
+
+    <span class="k">def</span> <span class="nf">xform</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xform_name</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="n">factory</span> <span class="o">=</span> <span class="n">TransformClientFactory</span><span class="p">(</span><span class="n">xform_name</span><span class="p">,</span> <span class="n">poem</span><span class="p">)</span>
+        <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+        <span class="n">reactor</span><span class="o">.</span><span class="n">connectTCP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">host</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="n">factory</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">factory</span><span class="o">.</span><span class="n">deferred</span>
+</pre></div>
+</div>
+<p>このクラスは、他のコードでも変換リクエストに使えるような、単一の <code class="docutils literal notranslate"><span class="pre">xform()</span></code> インターフェイスを表します。
+このため、ホスト名とポート番号に煩わされることなく変換の要求を出して、遅延オブジェクトを受け取ることができます。</p>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L163">try_to_cummingsify</a>
+コールバックを除いて、プログラムの残りの部分は変わりません。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">try_to_cummingsify</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">proxy</span><span class="o">.</span><span class="n">xform</span><span class="p">(</span><span class="s1">&#39;cummingsify&#39;</span><span class="p">,</span> <span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">fail</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+        <span class="nb">print</span> <span class="o">&amp;</span><span class="n">gt</span><span class="p">;</span><span class="o">&amp;</span><span class="n">gt</span><span class="p">;</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="s1">&#39;Cummingsify failed!&#39;</span>
+        <span class="k">return</span> <span class="n">poem</span>
+
+    <span class="k">return</span> <span class="n">d</span><span class="o">.</span><span class="n">addErrback</span><span class="p">(</span><span class="n">fail</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>このコールバックは遅延オブジェクトを返します。しかし、Proxy インスタンスを生成することを除けば <code class="docutils literal notranslate"><span class="pre">main</span></code> 関数の残りの部分を変更する必要はありません。
+<code class="docutils literal notranslate"><span class="pre">try_to_cummingsify</span></code> は遅延オブジェクトのチェーン (<code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> で返される遅延オブジェクトです) の一部ですので、
+すでに非同期に使われていて、何も変更する必要がありません。</p>
+<p><code class="docutils literal notranslate"><span class="pre">d.addErrback(fail)</span></code> の結果を返していることに気をつけてください。
+これはちょっとした構文糖衣です。
+<code class="docutils literal notranslate"><span class="pre">addCallback</span></code> と <code class="docutils literal notranslate"><span class="pre">addErrback</span></code> メソッドは元の遅延オブジェクトを返します。
+次のように記述した方が良さそうですね。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">d</span><span class="o">.</span><span class="n">addErrback</span><span class="p">(</span><span class="n">fail</span><span class="p">)</span>
+<span class="k">return</span> <span class="n">d</span>
+</pre></div>
+</div>
+<p>最初のバージョンと同じことですが、ちょっと短くなりましたね。</p>
+</div>
+</div>
+<div class="section" id="id5">
+<h2>クライアントをテストしてみる<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>新しいクライアントは以前のものたちとはやや異なる構文を持ちます。
+10001番ポートで変換サービスを起動していて、ふたつの詩のサーバが10002番ポートと10003番ポートで動いているならば、次のように実行できます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">client</span><span class="o">-</span><span class="mi">6</span><span class="o">/</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">.</span><span class="n">py</span> <span class="mi">10001</span> <span class="mi">10002</span> <span class="mi">10003</span>
+</pre></div>
+</div>
+<p>ふたつの詩をダウンロードして両方ともを変換するためには、変換サーバを次のように起動しましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">tranformedpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10001</span>
+</pre></div>
+</div>
+<p>詩のサーバはこんな感じです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">fastpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10002</span> <span class="n">poetry</span><span class="o">/</span><span class="n">fascination</span><span class="o">.</span><span class="n">txt</span>
+<span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">fastpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10003</span> <span class="n">poetry</span><span class="o">/</span><span class="n">science</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>これで詩のクライアントを上記のように実行できます。
+変換サーバをクラッシュさせてみて、同じコマンドでクライアントを再度実行してみましょう。</p>
+<div class="section" id="id6">
+<h3>まとめましょう<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
+<p>このパートでは、遅延オブジェクトがコールバックチェーンの途中で透過的に他の遅延オブジェクトを扱う方法を学びました。
+このため、私たちは詳しいことを気にせず安全に非同期のコールバックを「アウター」に付け足すことができます。
+私たちの関数の多くが非同期になりますので、とてもお手軽です。</p>
+<p>これで遅延オブジェクトに関しては全てを理解したのでしょうか？
+とんでもない！
+話しておくべき重要な機能がもうひとつあります。とはいえ、これは”<a class="reference internal" href="p14.html"><span class="doc">パート14: Deferred が無かったら</span></a>”にとっておきましょう。</p>
+</div>
+<div class="section" id="id7">
+<h3>おすすめの練習問題<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h3>
+<ol class="arabic simple">
+<li><p>名前によって特定の種類の変換をお願いできるようにクライアントを修正しましょう。</p></li>
+<li><p>変換サーバのアドレスがオプション引数になるようにクライアントを修正しましょう。引数がなければ変換ステップを飛ばします。</p></li>
+<li><p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L67">PoetryClientFactory</a> が現在は「自分で作ったら自分で開始させて」という遅延オブジェクトの決まりごとを破っています。これを改めるように <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> と <code class="docutils literal notranslate"><span class="pre">PoetryClientFactory</span></code> をリファクタリングしてください。</p></li>
+<li><p>実際にお見せしていませんが、エラー用コールバックが遅延オブジェクトを返すと対称的になります。
+このことを確認するために <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-10.py#L1">twisted-deferred/defer-10.py</a> の例を修正してみてください。</p></li>
+<li><p><a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L137">Deferred</a> の実装において、コールバックもしくはエラー用コールバックが自分とは異なる遅延オブジェクトを返す場合を扱っている箇所を見つけてください。</p></li>
+</ol>
+</div>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p12.html">パート12: 詩の変換サーバー</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p14.html">パート14: Deferred が無かったら</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

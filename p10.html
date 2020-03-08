@@ -1,0 +1,269 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート10: 変換された詩 &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート11: 詩が提供されました" href="p11.html" />
+    <link rel="prev" title="パート9: Deferred 再入門" href="p09.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート10: 変換された詩</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p09.html">パート9: Deferred 再入門</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p11.html">パート11: 詩が提供されました</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="id1">
+<h1>パート10: 変換された詩<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id2">
+<h2>クライアント 5.0<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>それでは、”<a class="reference internal" href="p09.html"><span class="doc">パート9: Deferred 再入門</span></a>” で提案してきたような方向性で、これまで作ってきた詩のクライアントにいくつかの変換ロジックを付け足していきましょう。
+しかしまずは、恥ずかしながら告白しておくことがあります。
+私は Byronification Engine を記述する術を知りません。
+これは私のプログラミングスキルの範疇を超えています。
+代わりに、Cummingsifier という、もう少し簡単な変換を実装していくことにしましょう。
+Cummingsifier は、詩を受け取って、元の詩に似てはいるものの <a class="reference external" href="http://en.wikipedia.org/wiki/E._E._Cummings">e.e.cummings</a> 形式で書かれた新しい詩を返すアルゴリズムです。
+Cummingsifier アルゴリズムの全てをここに示しましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">cummingsify</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">poem</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>不幸なことに、このアルゴリズムはとても簡単なので決して失敗することがありません。
+そこでクライアント 5.0 (<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry.py#L1">twisted-client-5/get-poetry.py</a> にあります) では、次のうちのいずれかを無作為に実行するように <code class="docutils literal notranslate"><span class="pre">cummingsify</span></code> を少し変更したバージョンを使うことにします。</p>
+<ol class="arabic simple">
+<li><p>cummingsified されたバージョンの詩を返します。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GibberishError</span></code> を送出します。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ValueError</span></code> を送出します。</p></li>
+</ol>
+<p>このようにして、予期せぬ方法で時々失敗するアルゴリズムをシミュレートします。</p>
+<p>クライアント 5.0 におけるその他の違いは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L122">poetry_main</a> 関数にのみあります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">poetry_main</span><span class="p">():</span>
+    <span class="n">addresses</span> <span class="o">=</span> <span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+    <span class="n">poems</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">errors</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">def</span> <span class="nf">try_to_cummingsify</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">cummingsify</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">GibberishError</span><span class="p">:</span>
+            <span class="k">raise</span>
+        <span class="k">except</span><span class="p">:</span>
+            <span class="nb">print</span> <span class="s1">&#39;Cummingsify failed!&#39;</span>
+            <span class="k">return</span> <span class="n">poem</span>
+
+    <span class="k">def</span> <span class="nf">got_poem</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+        <span class="nb">print</span> <span class="n">poem</span>
+        <span class="n">poems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">poem_failed</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+        <span class="nb">print</span> <span class="o">&gt;&gt;</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="s1">&#39;The poem download failed.&#39;</span>
+        <span class="n">errors</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">err</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">poem_done</span><span class="p">(</span><span class="n">_</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">poems</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">errors</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">addresses</span><span class="p">):</span>
+            <span class="n">reactor</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="n">address</span> <span class="ow">in</span> <span class="n">addresses</span><span class="p">:</span>
+        <span class="n">host</span><span class="p">,</span> <span class="n">port</span> <span class="o">=</span> <span class="n">address</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">get_poetry</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">try_to_cummingsify</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">got_poem</span><span class="p">,</span> <span class="n">poem_failed</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addBoth</span><span class="p">(</span><span class="n">poem_done</span><span class="p">)</span>
+
+    <span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>プログラムがサーバから詩をダウンロードすると、次のいずれかが起こります。</p>
+<ol class="arabic simple">
+<li><p>cummingsified バージョン (小文字に変換されたもの) の詩を出力します。</p></li>
+<li><p>元々の詩の後に “Cummingsify failed!” と出力します。</p></li>
+<li><p>“The poem download failed.” と出力します。</p></li>
+</ol>
+<p>私たちは複数のサーバからダウンロードできるようになりましたが、三つの異なる結果を全て見るまで、クライアント 5.0 をテストしてみるときはひとつのサーバを使ってプログラムを何度も実行するだけの方が簡単でしょう。
+また、サーバが存在しないポートに対してクライアントを実行させてみてください。</p>
+<p><code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> から得られたそれぞれの <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> に付け足したコールバックとエラー用コールバックのチェーンを図にしてみましょう。</p>
+<div class="figure align-default" id="id7">
+<span id="figure19"></span><img alt="_images/p10_deferred-42.png" src="_images/p10_deferred-42.png" />
+<p class="caption"><span class="caption-text">図１９：クライアント 5.0 における遅延オブジェクトの連鎖</span><a class="headerlink" href="#id7" title="Permalink to this image">¶</a></p>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">addCallback</span></code> によって付け加えられた何もしないエラー用コールバック (pass-through errback) に注意してください。
+これは、受け取った <code class="docutils literal notranslate"><span class="pre">Failure</span></code> が何であろうとも次のエラー用コールバック (<code class="docutils literal notranslate"><span class="pre">poem_failed</span></code>) にそれを渡します。
+このため <cite>poem_failed`</cite> は、 <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> (つまり、遅延オブジェクトは <code class="docutils literal notranslate"><span class="pre">errback</span></code> メソッドで発火させられます) と <code class="docutils literal notranslate"><span class="pre">cummingsify</span></code> 関数の両方から投げられたエラーを扱うことができます。</p>
+<p>図19 において
+<a class="reference external" href="http://inkscape.org/">Inkscape</a></p>
+<p><code class="docutils literal notranslate"><span class="pre">cummingsify</span></code> 関数がきちんと動くのは図20に示します。</p>
+<div class="figure align-default" id="id8">
+<span id="figure20"></span><img alt="_images/p10_deferred-5.png" src="_images/p10_deferred-5.png" />
+<p class="caption"><span class="caption-text">図２０：詩をダウンロードして正確に変換するとき</span><a class="headerlink" href="#id8" title="Permalink to this image">¶</a></p>
+</div>
+<p>図21は、詩を受信したものの <code class="docutils literal notranslate"><span class="pre">cummingsify</span></code> が <code class="docutils literal notranslate"><span class="pre">GibberishError</span></code> を送出する場合を表します。</p>
+<div class="figure align-default" id="id9">
+<span id="figure21"></span><img alt="_images/p10_deferred-6.png" src="_images/p10_deferred-6.png" />
+<p class="caption"><span class="caption-text">図２１：詩をダウンロードして GibberishError が出るとき</span><a class="headerlink" href="#id9" title="Permalink to this image">¶</a></p>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">try_to_cummingsify</span></code> コールバックは <code class="docutils literal notranslate"><span class="pre">GibberishError</span></code> を再度発生させますので、制御がエラー用コールバックに移り <code class="docutils literal notranslate"><span class="pre">poem_failed</span></code> は引数として例外を受け取って呼び出されます。(その引数はもちろん <code class="docutils literal notranslate"><span class="pre">Failure</span></code> でラップされています)</p>
+<p>そして <code class="docutils literal notranslate"><span class="pre">poem_failed</span></code> は 例外を発生させないかあるいは <code class="docutils literal notranslate"><span class="pre">Failure</span></code> を返しますので、呼び出し終えると制御は通常のコールバックに戻ります。
+もしも <code class="docutils literal notranslate"><span class="pre">poem_failed</span></code> にエラーを完全に処理して欲しければ、 <code class="docutils literal notranslate"><span class="pre">None</span></code> を返すことが妥当な振る舞いです。
+そうではなく <code class="docutils literal notranslate"><span class="pre">poem_failed</span></code> に何かをやってほしければ、しかしそれでもなおエラーを受け渡しながらであれば、 <code class="docutils literal notranslate"><span class="pre">poem_failed</span></code> がその <code class="docutils literal notranslate"><span class="pre">err</span></code> 引数を返し、処理はエラー用コールバックにいくでしょう。</p>
+<p>今のコードでは <code class="docutils literal notranslate"><span class="pre">got_poem</span></code> と <code class="docutils literal notranslate"><span class="pre">poem_failed</span></code> のどちらも失敗しないことに気をつけてください。このため <code class="docutils literal notranslate"><span class="pre">poem_done</span></code> というエラー用コールバックは決して呼び出されません。
+しかし、いかなる場合でもこの段階を踏むことは安全であり、 <code class="docutils literal notranslate"><span class="pre">got_poem</span></code> か <code class="docutils literal notranslate"><span class="pre">poem_failed</span></code> のどちらかに私たちが知らないバグがあるかもしれませんので、防御的プログラミング (“defensive” programming) を体現します。
+<code class="docutils literal notranslate"><span class="pre">addBoth</span></code> メソッドは、遅延オブジェクトをどのように発火しようとも特定の関数が実行されることを保証しますので、 <code class="docutils literal notranslate"><span class="pre">addBoth</span></code> を使うことは  <code class="docutils literal notranslate"><span class="pre">try/except</span></code> 文に <code class="docutils literal notranslate"><span class="pre">finally</span></code> 句を追加することに相当します。</p>
+<p>ここでは、詩をダウンロードして <code class="docutils literal notranslate"><span class="pre">cummingsify</span></code> 関数が <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> を発生させる場合を検証しましょう。図22に示します。</p>
+<div class="figure align-default" id="id10">
+<span id="figure22"></span><img alt="_images/p10_deferred-7.png" src="_images/p10_deferred-7.png" />
+<p class="caption"><span class="caption-text">図２２：詩をダウンロードして、cummingsify に失敗するとき</span><a class="headerlink" href="#id10" title="Permalink to this image">¶</a></p>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">got_poem</span></code> が変換されていない元のバージョンの詩を受け取る、ということを除いて、これは図20と同じです。
+この切り替えはすべて <code class="docutils literal notranslate"><span class="pre">try_to_cummingsify</span></code> コールバックの中で発生します。このコールバックは普通の <code class="docutils literal notranslate"><span class="pre">try/except</span></code> 文で <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> を捕まえて、その代わりに元の詩を返します。
+遅延オブジェクトがエラーを見ることはありません。</p>
+<p>最後に図23で、存在しないサーバから詩をダウンロードしようとした場合を示します。</p>
+<div class="figure align-default" id="id11">
+<span id="figure23"></span><img alt="_images/p10_deferred-8.png" src="_images/p10_deferred-8.png" />
+<p class="caption"><span class="caption-text">図２３：サーバに接続できないとき</span><a class="headerlink" href="#id11" title="Permalink to this image">¶</a></p>
+</div>
+<p>前回と同じように、その後の制御が通常のコールバックに戻るように <code class="docutils literal notranslate"><span class="pre">poem_failed</span></code> は <code class="docutils literal notranslate"><span class="pre">None</span></code> を返します。</p>
+</div>
+<div class="section" id="id3">
+<h2>クライアント 5.1<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>クライアント 5.0 では、遅延オブジェクトに最初に例外を捕まえさせるよりはむしろ、通常の <code class="docutils literal notranslate"><span class="pre">try/except</span></code> 文を使って <code class="docutils literal notranslate"><span class="pre">try_to_cummingsify</span></code> コールバックの <code class="docutils literal notranslate"><span class="pre">cummingsify</span></code> で例外を引っ掛けます。
+この戦略に特に悪いところはありませんが、違う方法でどうやってみるかを考えることは勉強になるでしょう。</p>
+<p>遅延オブジェクトに <code class="docutils literal notranslate"><span class="pre">GibberishError</span></code> と <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> の両方の例外を捕まえさせて、それらをエラー用コールバックの流れに送る場合を考えてみましょう。
+現在の振る舞いをそのままにするために、後続するエラー用コールバックはエラーが <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> かを確認する必要があり、もしそうなら、制御が通常のコールバックの流れに復帰して元の詩が出力されるように、そのままの詩を返すようさせます。</p>
+<p>しかし、問題がひとつあります。エラー用コールバックは元の詩を取得できません。 <code class="docutils literal notranslate"><span class="pre">cummingsify</span></code> 関数から送出され <code class="docutils literal notranslate"><span class="pre">Failure</span></code> でラップされた <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> を受け取るのです。
+エラー用コールバックにエラーを処理させるために、このコールバックが元の詩を受け取るように工夫する必要があります。</p>
+<p>ひとつの方法は、元の詩が例外に含まれるよう <code class="docutils literal notranslate"><span class="pre">cummingsify</span></code> 関数を変更することです。
+これこそがクライアント 5.1 で実現したことで、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L1">twisted-client-5/get-poetry-1.py</a> にあります。
+<code class="docutils literal notranslate"><span class="pre">ValueError</span></code> 例外を、第一引数で元の詩を受け取る独自の <code class="docutils literal notranslate"><span class="pre">CannotCummingsify</span></code> 例外に変更しました。</p>
+<p>もしも <code class="docutils literal notranslate"><span class="pre">cummingsify</span></code> が外部モジュールに実在する関数ならば、 <code class="docutils literal notranslate"><span class="pre">GibberishError</span></code> ではないすべての例外を引っ掛けて、代わりに <code class="docutils literal notranslate"><span class="pre">CannotCummingsify</span></code> 例外を発生させるようなもうひとつの関数でラップしてしまうことがおそらく最良の方法でしょう。
+この新しい方法を使うと <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L122">poetry_main</a> 関数は次のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">poetry_main</span><span class="p">():</span>
+    <span class="n">addresses</span> <span class="o">=</span> <span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+    <span class="n">poems</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">errors</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">def</span> <span class="nf">cummingsify_failed</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">err</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">CannotCummingsify</span><span class="p">):</span>
+            <span class="nb">print</span> <span class="s1">&#39;Cummingsify failed!&#39;</span>
+            <span class="k">return</span> <span class="n">err</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">err</span>
+
+    <span class="k">def</span> <span class="nf">got_poem</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+        <span class="nb">print</span> <span class="n">poem</span>
+        <span class="n">poems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">poem_failed</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+        <span class="nb">print</span> <span class="o">&gt;&gt;</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="s1">&#39;The poem download failed.&#39;</span>
+        <span class="n">errors</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">err</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">poem_done</span><span class="p">(</span><span class="n">_</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">poems</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">errors</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">addresses</span><span class="p">):</span>
+            <span class="n">reactor</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="n">address</span> <span class="ow">in</span> <span class="n">addresses</span><span class="p">:</span>
+        <span class="n">host</span><span class="p">,</span> <span class="n">port</span> <span class="o">=</span> <span class="n">address</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">get_poetry</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">cummingsify</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addErrback</span><span class="p">(</span><span class="n">cummingsify_failed</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">got_poem</span><span class="p">,</span> <span class="n">poem_failed</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addBoth</span><span class="p">(</span><span class="n">poem_done</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>私たちが生成したそれぞれの遅延オブジェクトは、図24の構造を持ちます。</p>
+<div class="figure align-default" id="id12">
+<span id="figure24"></span><img alt="_images/p10_deferred-9.png" src="_images/p10_deferred-9.png" />
+<p class="caption"><span class="caption-text">図２４：クライアント 5.1 における遅延オブジェクトの連鎖</span><a class="headerlink" href="#id12" title="Permalink to this image">¶</a></p>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">cummingsify_failed</span></code> というエラー用コールバックを確認してください。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">cummingsify_failed</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">err</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">CannotCummingsify</span><span class="p">):</span>
+        <span class="nb">print</span> <span class="s1">&#39;Cummingsify failed!&#39;</span>
+        <span class="k">return</span> <span class="n">err</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">err</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">Failure</span></code> に内包された例外が <code class="docutils literal notranslate"><span class="pre">CannotCummingsify</span></code> のインスタンスかを確認するために、 <code class="docutils literal notranslate"><span class="pre">Failure</span></code> オブジェクトの <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L305">check</a> メソッドを使っています。
+もしもそうなら、第一引数 (元の詩) を例外に返し、エラーを処理します。
+戻り値は <code class="docutils literal notranslate"><span class="pre">Failure</span></code> ではありませんので、制御は通常のコールバックの流れに戻ります。
+そうでなければ <code class="docutils literal notranslate"><span class="pre">Failure</span></code> 自身を返し、エラーを送って (re-raise) エラー用コールバックの流れに落とし込みます。
+お分かりのように、例外は <code class="docutils literal notranslate"><span class="pre">Failure</span></code> の <code class="docutils literal notranslate"><span class="pre">value</span></code> 属性で参照できます。</p>
+<p>図25は <code class="docutils literal notranslate"><span class="pre">CannotCummingsify</span></code> 例外を受け取ったときに発生することを表します。</p>
+<div class="figure align-default" id="id13">
+<span id="figure25"></span><img alt="_images/p10_deferred-10.png" src="_images/p10_deferred-10.png" />
+<p class="caption"><span class="caption-text">図２５：CannotCummigsify エラーが発生するとき</span><a class="headerlink" href="#id13" title="Permalink to this image">¶</a></p>
+</div>
+<p>ということで、遅延オブジェクトを使うときは、例外を処理するために <code class="docutils literal notranslate"><span class="pre">try/except</span></code> を使うようにするか、遅延オブジェクトにエラーをエラー用コールバックに再度送らせるかのどちらかを選択できます。</p>
+</div>
+<div class="section" id="id5">
+<h2>まとめ<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>パート10では、エラーを誘導してチェーンを辿らせる <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> の力を使って詩のクライアントを更新しました。
+使った例はいくぶん実用的ではありませんが、遅延オブジェクトにおける制御フローがそれぞれのステージの結果によって通常のコールバックとエラー用コールバックを行き来する様子を描き出せていると思います。</p>
+<p>さあ、これで遅延オブジェクトに関して知っておくべきことは全て身に着けましたか？
+いえ、まだです！
+今後のパートでも遅延オブジェクトの更なる機能を探求していきましょう。
+とはいえ”<a class="reference internal" href="p11.html"><span class="doc">パート11: 詩が提供されました</span></a>”ではちょっと趣向を変えて、Twisted を使って詩のサーバを実装するとしましょう。</p>
+</div>
+<div class="section" id="id6">
+<h2>おすすめの練習問題<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic">
+<li><p>図25は、クライアント 5.1 における遅延オブジェクトが発火する４つの可能性のうちのひとつを表しています。
+他の３つを書き出してみてください。</p></li>
+<li><p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/deferred-simulator.py#L1">deferred simulator</a> を使って、クライアント 5.0 と 5.1 が発火する様子をシミュレートしてみましょう。
+手始めに、このシミュレータプログラムは次のようにして、クライアント 5.0 における <code class="docutils literal notranslate"><span class="pre">try_to_cummingsify</span></code> 関数が成功する様子を表現できます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">r</span> <span class="n">poem</span> <span class="n">p</span>
+<span class="n">r</span> <span class="kc">None</span> <span class="n">r</span> <span class="kc">None</span>
+<span class="n">r</span> <span class="kc">None</span> <span class="n">r</span> <span class="kc">None</span>
+</pre></div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p09.html">パート9: Deferred 再入門</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p11.html">パート11: 詩が提供されました</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

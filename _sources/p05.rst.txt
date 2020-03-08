@@ -1,0 +1,352 @@
+==============================
+パート5: もっと Twisted の詩を
+==============================
+
+抽象的な表現技法
+----------------
+":doc:`p04`"では Twisted を使った最初の詩のクライアントを作りました。ちゃんと動きますが、改善の余地は大いにあります。
+
+まず始めに、クライアントのコードにはネットワークソケットを生成したり、そのソケットからデータを受信するようなありふれたものが混ざっています。Twisted は、私たちが新しいプログラムを記述するときに毎回自力で実装する必要がないように、こうした類のことを助けてくれる機能を提供してくれます。非同期入出力では `クライアントコード <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py>`_ で見てきたようなちょっとトリッキーな例外処理を扱いますので、このサポートは特にありがたいものです。さらに、複数のプラットフォームで動作するようにしたいと思ったらさらにトリッキーなことが要求されます。暇な時間があれば、"win32" 用の Twisted のコードを眺めて、かのプラットフォームに独特の注意点がどれほどあるかを確認してください。
+
+現状のクライアントが持つもうひとつの問題点はエラーの扱いです。Twisted クライアントのバージョン 1.0 を動かしてみて、サーバが待ち受けていないポートからダウンロードさせてみてください。何も言わずにクラッシュしてしまいます。クライアントを直してもよいのですが、エラー処理は Twisted の API を使った方が簡単です。
+
+最後の問題点は、クライアントの再利用性がないことです。他のモジュールが詩を取得する場合にはどうしましょうか？「呼び出す」モジュールが詩のダウンロードが完了したことを知るにはどうしましょうか？詩の全てを読み込むまでブロックしてしまうような、単純に詩の文字列を返す関数を記述するわけにはいきません。実際的な問題ではありますが、今日のところは修正する気はありません。後のパートまでとっておきましょう。
+
+高レベルの API とインターフェイスを使って、ひとつ目とふたつ目の問題点を修正することにしましょう。Twisted フレームワークは疎結合な抽象化層から成っており、Twisted を学ぶとはこうした層が提供することを学ぶことなのです。つまり、API、インターフェイス、そして実装のそれぞれにおいて利用できることを学ぶ、ということです。ここで紹介することは入門用のことですので、それぞれの抽象化に関して徹底的に詳細まで学習する気はありませんし、くまなく調査する気もありません。Twisted を一緒に使うとラクチンだと思ってもらえるように、最も重要な部分に目を通していくだけです。Twisted のアーキテクチャを取り巻く形式に一旦慣れてしまうと、新しい部分を自習するのはずっと簡単になるでしょう。
+
+一般的に、それぞれの Twisted の抽象化はあるコンセプトと一緒に考えられます。たとえば、 ``IReadDescriptor`` を使ってパート４で記述した 1.0 のクライアントには、「読み込み可能なファイルディスクリプタ」という抽象化が見られます。Twisted の抽象化は、たいてい、どのように振舞うかを内包したオブジェクトを規定するインターフェイスで定義されます。Twisted の抽象化を学習するときに覚えておいて欲しい最も大事なことは次の通りです。
+
+    「Twisted における最も高レベルの抽象化は、低レベルのものを **使って** 組み立てられています。置き換えでは **ありません** 。」
+
+このため、Twisted の新しい抽象化を学んでいくときは、それが何をするのかと何をしないのかの両方を気にかけてください。特に、早い時期に記述された抽象化 A が F という機能を実装しているなら、おそらく F はその他の抽象化では実装されていないでしょう。むしろ、他の B という抽象化が F を必要としているなら、F 自身を実装するのではなく A を使うことになるでしょう。(一般的には、B の実装は A の実装をサブクラス化したものか、A を実装する他のオブジェクトへの参照になるでしょう。)
+
+ネットワーキングは複雑な課題であり、それゆえに Twisted は多くの抽象化を持ちます。まずは低レベルから始めることで、動作する Twisted のプログラムにそれらの全てをまとめる方法をより明確に描けるようになっていけば良いと思います。
+
+繰り返し思考
+----------------
+ここまで学んできた最も重要な抽象化は、実際には Twisted における最も重要な抽象化のことですが、reactor です。Twisted を使って構築されるすべてのプログラムの中心には、プログラムがどれほどたくさんの層をもっていようとも、回り続けてすべてのことを進めてくれる reactor ループがあります。Twisted は reactor が提供する機能以外のことを持ち合わせていません。実際、Twisted の他の部分のほとんどは、「reactor を使って X という何かを簡単にするための道具」だと考えられます。X は、「Web ページを提供すること」だったり「データベースへクエリを実行すること」だったり、その他特定の機能のことかもしれません。クライアント 1.0 がそうしているように、低レベルの API に固執することも可能ではありますが、自分たちでより多くのことを実装しなくてはいけません。高レベルの抽象化に移行すると、一般的には少ないコードの記述になります。(Twisted にプラットフォーム依存のややこしいことをやらせますしね。)
+
+しかし、Twisted の層の外で作業しているときは reactor が存在していることを簡単に忘れられます。それなりの大きさの Twisted プログラムでは、reactor API を直接使っている部分はごくわずかでしょう。他の低レベルの抽象化にも同じことが言えます。クライアント 1.0 で使ったファイルディスクリプタの抽象化は、より高レベルの概念によって完全に隠蔽されます。(内部では使われていますが、私たちが目にすることは滅多にありません。)
+
+ファイルディスクリプタの抽象化を使っている限りは、実際には問題とはなりません。Twisted に非同期入出力の機構を制御させておくと、私たちは解決すべき問題に集中できるようになります。しかし、reactor は違います。決して見えなくなることはありません。Twisted を使おうと決めることは、Reactor パターンを使うと決めることですし、コールバックと協調的マルチタスクを使う「reactive スタイル」のプログラミングを意図します。Twisted を正確に使いたいなら、reactor の存在 (と、どうやって動作しているのか) を気にしておかなくてはいけません。パート６でもっと詳しいことをやりますが、今のところは次のメッセージをあげましょう。
+
+    この入門文書では、":ref:`figure5`"と":ref:`figure6`"が最も重要なダイアグラムです。
+
+新しい概念を説明するためにダイアグラムを使い続けるでしょうが、これら二つの図は頭に叩き込んでおかなくてはいけません。私が Twisted を使ってプログラムを書くときには、いつも念頭においている図です。
+
+コードを見ていく前に、三つの新しい抽象化を紹介します。Transports と Protocols と Protocol Factories です。
+
+Transports
+^^^^^^^^^^
+トランスポート層の抽象化は Twisted の中心となる interface_ モジュールの ITransport_ で定義されています。Twisted のトランスポート層はバイトを送受信できる単一の接続を表現します。私たちの詩のクライアントにとっては、トランスポート層は TCP_ 接続を抽象化してくれます。以前は自分自身で実装していた類のものです。しかし、Twisted は `Unix パイプ`_ や UDP_ ソケットなどを介した入出力も提供します。トランスポート層の抽象化はこのような接続のことを表し、それがどのような接続であろうとも非同期入出力の詳細なことを扱います。
+
+.. _interface: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py
+.. _ITransport: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1289
+.. _TCP: http://en.wikipedia.org/wiki/Transmission_Control_Protocol
+.. _UDP: http://en.wikipedia.org/wiki/Udp
+.. _Unix パイプ: http://en.wikipedia.org/wiki/Unix_pipe#Network_pipes
+
+``ITransport`` で定義されているメソッドに目を通してみても、データを受信するようなコードが見つからないかもしれません。これは、トランスポート層は常に、低レベルな部分 (接続オブジェクトからデータを非同期に読み込むような部分) を処理し、コールバックを介して私たちにデータを渡すためです。似たようなことですが、トランスポートオブジェクトの書き込みに関するメソッドは、ブロッキングを避けるために即座にはデータを書き出さないようにするかもしれません。トランスポート層にデータを書き出すように知らせることは、「できる限り早くデータを送ってくれ、ただしブロッキングを避けるようにして」ということを意味します。もちろん、データは私たちが渡した通りの順番で書かれるでしょう。
+
+基本的に、私たちのコードに自分でトランスポートオブジェクトを実装することはありません。むしろ、Twisted がすでに提供してくれていて、reactor に接続をつないでもらうようにするときに生成される実装を使うことになります。
+
+Protocols
+^^^^^^^^^
+Twisted のプロトコルは同じく interface_ モジュールの IProtocol_ で定義されます。予想通り、プロトコルオブジェクトは プロトコル_ を実装します。つまり、Twisted におけるプロトコルの特定の実装はあるネットワークプロトコル、 FTP_ や IMAP_ や自分たちの目的のために作った名も無きプロトコルのようなもの、を実装すべきということです。私たちの詩のプロトコルはそのようなもののひとつですが、これは接続が確立されるとすぐに詩の全てのバイトを単純に送ります。一方で、接続が閉じられるのは詩の終わりです。
+
+.. _IProtocol: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1111
+.. _プロトコル: http://en.wikipedia.org/wiki/Protocol_(computing)
+.. _FTP: http://en.wikipedia.org/wiki/File_Transfer_Protocol
+.. _IMAP: http://en.wikipedia.org/wiki/Internet_Message_Access_Protocol
+
+厳密に言えば、それぞれの Twisted プロトコルのオブジェクトはある特定の接続のためのプロトコルを実装します。このため、プログラムで使う接続 (もしくは、サーバの場合には待ちうける接続になります) にはプロトコルのインスタンスがひとつ必要となります。こうすることで、プロトコルのインスタンスは「ステートフル」なプロトコルの状態を保持し、部分的に受信したメッセージのデータを蓄積するのに適したものになります。(非同期入出力で、あるデータサイズのバイト列を受け取るからです。)
+
+では、プロトコルのインスタンスは何の接続を受け持っているかをどのようにして知るのでしょうか？ ``IProtocol`` の定義を見てみると、 ``makeConnection`` と呼ばれるメソッドが見つかるでしょう。このメソッドはコールバックであり、トランスポートインスタンスを唯一の引数として、Twisted のコードが呼び出します。トランスポートはプロトコルが使おうとしている接続なのです。
+
+Twisted には一般的なプロトコルのためにたくさんのプロトコル実装が組み込まれています。 twisted.protocol.basic_ にいくつか簡単な実装があります。新しいプロトコルを書き始める前に Twisted のソースを確認してみるのは良い考えです。利用可能な実装がすでにあるかもしれません。しかし、なかったとしても自分で実装すれば何も問題ありません。詩のクライアントでやっていくことにしましょう。
+
+.. _twisted.protocol.basic: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py
+
+Protocol Factories
+^^^^^^^^^^^^^^^^^^
+それぞれの接続にはプロトコルが必要であり、プロトコルは私たちが実装するクラスのインスタンスかもしれません。Twisted に接続を管理させますので、新しい接続が作られたときはいつでもその場その場で適切なプロトコルを生成する方法が必要です。プロトコルのインスタンスを作るのはプロトコルファクトリの仕事です。
+
+たぶん推察の通り、プロトコルファクトリ API は interface_ モジュールの IProtocolFactory_ で定義されます。プロトコルファクトリはデザインパターンの Factory_ の一例であり、その通りに動作します。 ``buildProtocol`` メソッドは呼び出される度に新しいプロトコルインスタンスを返すことになっています。これは、新しい接続の度に新しいプロトコルインスタンスを生成するために Twisted が使うメソッドです。
+
+.. _IProtocolFactory: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1259
+.. _Factory: http://en.wikipedia.org/wiki/Factory_pattern
+
+詩を取得するクライアント 2.0: まずは Blood.0
+--------------------------------------------
+よし、それでは Twisted の詩のクライアントのバージョン 2.0 を見ていきましょう。コードは `twisted-client-2/get-poetry.py`_ にあります。他のものと同様に動かすことができ、煩雑なので載せませんが、似たような出力になるでしょう。これは、バイトを受信するとタスク番号を出力する最後のバージョンになります。ここまでは、全ての Twisted プログラムは交互にタスクを実行し、一度に比較的小さなデータのかたまりしか処理しませんでした。これからも大事な局面では何が起こっているかを表示するために ``print`` 文を使っていきますが、冗長な出力はやめます。
+
+.. _twisted-client-2/get-poetry.py: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py
+
+バージョン 2.0 のクライアントでは、ソケットが見えなくなりました。 ``socket`` モジュールをインポートすらしていませんし、ソケットオブジェクトやファイルディスクリプタなどを参照しません。その代わりに、 `このようにして <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L110>`_ reactor に詩のサーバに接続するように伝えています。
+::
+
+    factory = PoetryClientFactory(len(addresses))
+
+    from twisted.internet import reactor
+
+    for address in addresses:
+        host, port = address
+        reactor.connectTCP(host, port, factory)
+
+
+``connectTCP`` メソッドに注目してください。最初のふたつの引数は見たままです。三つ目の引数は私たちの PoetryClientFactory_ のインスタンスです。これは詩のクライアントのプロトコルファクトリであり、Twisted が必要に応じて私たちの PoetryProtocol_ インスタンスを生成できるように reactor に渡します。
+
+.. _PoetryClientFactory: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L69
+.. _PoetryProtocol: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L52
+
+以前のクライアントにおける ``PoetrySocket`` オブジェクトとは違い、ファクトリもプロトコルもスクラッチから実装しているわけではないことに気をつけてください。その代わりに、Twisted が twisted.internet.protocol_ で提供しているベース実装をサブクラス化しています。基本となるファクトリの基底クラスは twisted.internet.protocol.Factory_ ですが、私たちはクライアントに特化されたサブクラスである ClientFactory_ を使っています。(サーバのように接続を待ち受けるのではなく、接続を生成します。)
+
+.. _twisted.internet.protocol: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py
+.. _twisted.internet.protocol.Factory: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L24
+.. _ClientFactory: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L103
+
+Twisted の ``Factory`` クラスは ``buildProtocol`` を実装しているという利点も享受できます。私たちの `サブクラス <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L79>`_ 内で基底クラスの実装を呼び出すのです。
+::
+
+    def buildProtocol(self, address):
+        proto = ClientFactory.buildProtocol(self, address)
+        proto.task_num = self.task_num
+        self.task_num += 1
+        return proto
+
+基底クラスは何のプロトコルを構築するかをどのようにして知るのでしょうか？ ``PoetryClientFactory`` の ``protocol`` 属性を設定しているのです。
+::
+
+    class PoetryClientFactory(ClientFactory):
+
+        task_num = 1
+
+        protocol = PoetryProtocol # tell base class what proto to build
+
+基底 ``Factory`` クラスは、 ``protocol`` 属性に設定したクラス (つまり ``PoetryProtocol`` のことです) をインスタンス化し、新しいインスタンスにおける ``factory`` 属性をその「親」のファクトリへの参照になるように設定することで ``buildProtocol`` を実装します。この様子を図８に示します。
+
+.. _figure8:
+
+.. figure:: images/p05_protocols-1.png
+
+    図８：プロトコルが生成されるとき
+
+上で述べたように、プロトコルオブジェクトの ``factory`` 属性は、同じファクトリから作られたプロトコルに状態を共有させます。ファクトリは「ユーザコード」で生成されますので、同じ属性がプロトコルオブジェクトに通信を許可することにより、リクエストの初期化が最初に発生した時点でコードに結果を返します。これはパート６で見ていきます。
+
+プロトコルの ``factory`` 属性はプロトコルファクトリのインスタンスを参照しますが、ファクトリの ``protocol`` 属性はプロトコルのクラスを参照します。一般には、単一のファクトリは複数のプロトコルインスタンスを生成するでしょう。
+
+プロトコル生成の二番目の段階では、 ``makeConnection`` メソッドを使って、Transport を持ったプロトコルに接続します。このメソッドを自分で実装する必要はありません。Twisted の基底クラスが標準の実装を提供してくれるからです。初期設定では、 ``makeConnection`` は ``transport`` 属性の Transport への参照を保存し、 ``connected`` 属性を真 (True) に設定します。図９にその様子を描きました。
+
+.. _figure9:
+
+.. figure:: images/p05_protocols-2.png
+
+    図９：プロトコルと Transport の出会い
+
+この方法で一旦初期化されると、プロトコルは実際の仕事に取り掛かれます。低レベルのデータの流れを高レベルのプロトコルメッセージの流れに変換する (逆も同様です) ことです。入力データを処理するために鍵となるメソッドは ``dataReceived`` です。これは私たちのクライアントでは `このように <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L57>`_ 実装しています。
+::
+
+    def dataReceived(self, data):
+        self.poem += data
+        msg = 'Task %d: got %d bytes of poetry from %s'
+        print  msg % (self.task_num, len(data), self.transport.getHost())
+
+``dataReceived`` が呼ばれる度に文字列形式で新しいバイト列 (``data``) を得ます。非同期入出力にはつきものですが、どれくらいのデータを受け取るかを知るすべはありませんので、完全なプロトコルメッセージを受け取るまでバッファに溜めなくていけません。私たちの場合だと、詩は接続が閉じられるまで終わりませんので、 ``.poem`` 属性にバイトを追加し続けます。
+
+どのサーバから届いたデータかを区別するために Transport の `getHost <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1341>`_ メソッドを使っています。これは、前のクライアントとの一貫性のためにやっているだけです。そうでなければ Transport を明示的に使う必要は全くありません。サーバへ何もデータを送らないからです。
+
+``dataReceived`` メソッドが呼ばれたときに何が起こっているかをちょっと見ていきましょう。バージョン 2.0 のクライアントと同じディレクトリに ``twisted-client-2/get-poetry-stack.py`` というもう一つのクライアントがあります。 ``dataReceived`` メソッドが次のように変更された以外は、2.0 のクライアントのようになります。
+::
+
+    def dataReceived(self, data):
+        traceback.print_stack()
+        os._exit(0)
+
+この変更によってプログラムはスタックトレースを出力します。そして、データを受け取った最初のタイミングで終了します。このバージョンを動かしてみるとこんな感じになります。
+::
+
+    python twisted-client-2/get-poetry-stack.py 10000
+
+次のようなスタックトレースが得られるでしょう。
+::
+
+    File "twisted-client-2/get-poetry-stack.py", line 125, in
+        poetry_main()
+
+    ... # I removed a bunch of lines here
+
+    File ".../twisted/internet/tcp.py", line 463, in doRead  # Note the doRead callback
+        return self.protocol.dataReceived(data)
+    File "twisted-client-2/get-poetry-stack.py", line 58, in dataReceived
+        traceback.print_stack()
+
+1.0 のクライアントで使った ``doRead`` コールバックがありますね！前にも述べたように、Twisted は既存の機能を置き換えるのではなくそれらを使って新しい抽象化層を組み立てます。ですから、今でも ``IReadDescriptor`` の実装はしっかりと動作していますし、私たちのコードではなく、Twisted によって実装されているのです。もし興味をもったなら、Twisted の実装は ``twisted.internet.tcp`` の中にあります。コードを追いかけてみると、 ``IWriteDescriptor`` と ``ITransport`` を実装する同じオブジェクトを目にするでしょう。このため、 ``IReadDescriptor`` は実際には見せかけの Transport オブジェクトです。 ``dataReceived`` コールバックは図１０のように表せます。
+
+.. _figure10:
+
+.. figure:: images/p05_reactor-data-received.png
+
+    図１０： ``dataReceived`` コールバック
+
+
+詩をダウンロードし終えると ``PoetryProtocol`` オブジェクトは ``PoetryClientFactory`` に知らせます。
+::
+
+    def connectionLost(self, reason):
+        self.poemReceived(self.poem)
+
+    def poemReceived(self, poem):
+        self.factory.poem_finished(self.task_num, poem)
+
+トランスポートの接続が閉じられるときは ``connectionLost`` コールバックが関係してきます。 ``reason`` 引数は接続がきれいに閉じられたのかエラーのせいなのかという追加情報を持つ twisted.python.failure.Failure_ オブジェクトです。私たちのクライアントは単にこの値を無視するだけで、詩を受信しきったと仮定します。
+
+.. _twisted.python.failure.Failure: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py
+
+全ての詩をダウンロードし終えると、ファクトリは reactor を終了させます。私たちのプログラムがやっていることといえば詩をダウンロードしているだけ、ということをもう一度確認してください。これでは ``PoetryClientFactory`` オブジェクトの再利用性が低くなってしまいます。次のパートで修正するとして、ここでは ``poem_finished`` コールバックが詩の数を追いかけている方法に着目してください。
+::
+
+    ...
+        self.poetry_count -= 1
+
+        if self.poetry_count == 0:
+            ...
+
+それぞれの詩が別々のスレッドでダウンロードされるようなマルチスレッドプログラムを書いていたとすれば、ふたつ以上のスレッドが ``poem_finished`` を同時に呼び出さないように、この部分のコードをロックで保護する必要があります。さもないと、reactor を二回終了させることになるかもしれません (そんな問題のためにトレースバックを得られるわけですが)。しかし、reactive システムではそんな面倒なことは必要ありません。reactor は一度にひとつのコールバックしか操作しませんので、このような問題は起こりようもありません。
+
+新しいクライアントは 1.0 クライアントよりも寛容に接続の失敗も扱います。その部分を実行する ``PoetryClientFactory`` クラスにおけるコールバックは次の通りです。
+::
+
+    def clientConnectionFailed(self, connector, reason):
+        print 'Failed to connect to:', connector.getDestination()
+        self.poem_finished()
+
+コールバックはファクトリにあり、プロトコルではないことに注目してください。プロトコルは接続が確立された後にしか生成されませんので、接続を確立できないことを知るのはファクトリ、ということになります。
+
+もっと簡単なクライアント
+^^^^^^^^^^^^^^^^^^^^^^^^
+新しいクライアントはすでに非常に簡単ですが、タスク番号を意識しなくてよければ、もっと簡単にできます。結局のところ、クライアントは正に詩そのものになるでしょう。簡略化されたバージョン 2.1 の実装は `twisted-client-2/get-poetry-simple.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry-simple.py>`_ にあります。
+
+まとめ
+------
+クライアント 2.0 は、すべての Twisted ハッカーが慣れ親しんでおくべき Twisted の抽象化を使います。もし、いくつかの詩を出力して終了するようなコマンドラインクライアントで十分なら、ここで止めてしまってプログラムは出来上がったことにしてしまえます。しかし、再利用できるコード、つまり、いくつかの詩をダウンロードしてほかの何かも実行するような大規模なプログラムに組み込めるコードが欲しいとなると、やるべきことはまだあります。":doc:`p06`"ではそこに焦点を当てることにしましょう。
+
+おすすめの練習問題
+------------------
+#. 指定された時間が経過しても詩をダウンロードし終えないときはクライアントにタイムアウトさせるために ``callLater`` を使ってください。タイムアウトで接続を閉じるためにはトランスポートの `loseConnection <http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1321>`_ メソッドを使ってください。なお、時間内に詩をダウンロードし終えたらタイムアウトをキャンセルすることを忘れないでくださいね。
+#. ``connectionLost`` が呼び出されたときに発生するコールバックの呼び出し順序を解析するため、スタックトレースメソッドを使ってください。
+
+..
+    <H2>Part 5: Twistier Poetry
+    This continues the introduction started <A href="http://krondo.com/blog/?p=1209">here</A>. You can find an index to the entire series <A href="http://krondo.com/blog/?page_id=1327">here</A>.
+    <H3>Abstract Expressionism
+    In <A href="http://krondo.com/blog/?p=1445">Part 4</A> we made our first poetry client that uses Twisted. It works pretty well, but there is definitely room for improvement.
+    First of all, the client includes code for mundane details like creating network sockets and receiving data from those sockets. Twisted provides support for these sorts of things so we don't have to implement them ourselves every time we write a new program. This is especially helpful because asynchronous I/O requires a few tricky bits involving exception handling as you can see in the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py">client code</A>. And there are even more tricky bits if you want your code to work on multiple platforms. If you have a free afternoon, search the Twisted sources for "win32″ to see how many corner cases that platform introduces.
+    Another problem with the current client is error handling. Try running version 1.0 of the Twisted client and tell it to download from a port with no server. It just crashes. We could fix the current client, but error handling is easier with the Twisted APIs we'll be using today.
+    Finally, the client isn't particularly re-usable. How would another module get a poem with our client? How would the "calling" module know when the poem had finished downloading? We can't write a function that simply returns the text of the poem as that would require blocking until the entire poem is read. This is a real problem but we're not going to fix it today — we'll save that for future Parts.
+    We're going to fix the first and second problems using a higher-level set of APIs and Interfaces. The Twisted framework is loosely composed of layers of abstractions and learning Twisted means learning what those layers provide, i.e, what APIs, Interfaces, and implementations are available for use in each one. Since this is an introduction we're not going to study each abstraction in complete detail or do an exhaustive survey of every abstraction that Twisted offers. We're just going to look at the most important pieces to get a better feel for how Twisted is put together. Once you become familiar with the overall style of Twisted's architecture, learning new parts on your own will be much easier.
+    In general, each Twisted abstraction is concerned with one particular concept. For example, the 1.0 client from Part 4 uses <CODE>IReadDescriptor</CODE>, the abstraction of a "file descriptor you can read bytes from". A Twisted abstraction is usually defined by an Interface specifying how an object embodying that abstraction should behave. The most important thing to keep in mind when learning a new Twisted abstraction is this:
+    <P style="padding-left: 30px;">Most higher-level abstractions in Twisted are built by <EM>using</EM> lower-level ones, <EM>not</EM> by replacing them.
+    So when you are learning a new Twisted abstraction, keep in mind both what it does and what it does not do. In particular, if some earlier abstraction <EM>A</EM> implements feature <EM>F</EM>, then <EM>F</EM> is probably not implemented by any other abstraction. Rather, if another abstraction <EM>B</EM> needs feature <EM>F</EM>, it will use <EM>A</EM> rather than implement <EM>F</EM> itself.&nbsp; (In general, an implementation of <EM>B</EM> will either sub-class an implementation of <EM>A</EM> or refer to another object that implements <EM>A</EM>).
+    Networking is a complex subject, and thus Twisted contains lots of abstractions. By starting with lower levels first, we are hopefully getting a clearer picture of how they all get put together in a working Twisted program.
+    <H3>Loopiness in the Brain
+    The most important abstraction we have learned so far, indeed the most important abstraction in Twisted, is the reactor. At the center of every program built with Twisted, no matter how may layers that program might have, there is a reactor loop spinning around and making the whole thing go. Nothing else in Twisted provides the functionality the reactor offers. Much of the rest of Twisted, in fact, can be thought of as "stuff that makes it easier to do X using the reactor" where X might be "serve a web page" or "make a database query" or some other specific feature. Although it's possible to stick with the lower-level APIs, like the client 1.0 does, we have to implement more things ourselves if we do. Moving to higher-level abstractions generally means writing less code (and letting Twisted handle the platform-dependent corner cases).
+    But when we're working at the outer layers of Twisted it can be easy to forget the reactor is there. In any Twisted program of reasonable size, relatively few parts of our code will actually use the reactor APIs directly. The same is true for some of the other low-level abstractions. The file descriptor abstractions we used in client 1.0 are so thoroughly subsumed by higher-level concepts that they basically disappear in real Twisted programs (they are still used on the inside, we just don't see them as such).
+    As far as the file descriptor abstractions go, that's not really a problem. Letting Twisted handle the mechanics of asynchronous I/O frees us to concentrate on whatever problem we are trying to solve. But the reactor is different. It never really disappears. When you choose to use Twisted you are also choosing to use the Reactor Pattern, and that means programming in the "reactive style" using callbacks and cooperative multi-tasking. If you want to use Twisted correctly, you have to keep the reactor's existence (and the way it works) in mind. We'll have more to say about this in Part 6, but for now our message is this:
+    <P style="padding-left: 30px;"><A href="http://krondo.com/blog/?p=1247#figure5">Figure 5</A> and <A href="http://krondo.com/blog/?p=1333#figure6">Figure 6</A> are the most important diagrams in this introduction.
+    We'll keep using diagrams to illustrate new concepts, but those two Figures are the ones that you need to burn into your brain, so to speak. Those are the pictures I constantly have in mind while writing programs with Twisted.
+    Before we dive into the code, there are three new abstractions to introduce: Transports, Protocols, and Protocol Factories.
+    <H4>Transports
+    The Transport abstraction is defined by <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1289"><CODE>ITransport</CODE></A> in the main Twisted <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py"><CODE>interfaces</CODE></A> module. A Twisted Transport represents a single connection that can send and/or receive bytes. For our poetry clients, the Transports are abstracting <A href="http://en.wikipedia.org/wiki/Transmission_Control_Protocol">TCP</A> connections like the ones we have been making ourselves in earlier versions. But Twisted also supports I/O over <A href="http://en.wikipedia.org/wiki/Unix_pipe#Network_pipes">UNIX Pipes</A> and <A href="http://en.wikipedia.org/wiki/Udp">UDP</A> sockets among other things. The Transport abstraction represents any such connection and handles the details of asynchronous I/O for whatever sort of connection it represents.
+    If you scan the methods defined for <CODE>ITransport</CODE>, you won't find any for receiving data. That's because Transports always handle the low-level details of reading data asynchronously from their connections, and give the data to us via callbacks. Along similar lines, the write-related methods of Transport objects may choose not to write the data immediately to avoid blocking. Telling a Transport to write some data means "send this data as soon as you can do so,&nbsp; subject to the requirement to avoid blocking". The data will be written in the order we provide it, of course.
+    We generally don't implement our own Transport objects or create them in our code. Rather, we use the implementations that Twisted already provides and which are created for us when we tell the reactor to make a connection.
+    <H4>Protocols
+    Twisted Protocols are defined by <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1111"><CODE>IProtocol</CODE></A> in the same <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py"><CODE>interfaces</CODE></A> module. As you might expect, Protocol objects implement <A href="http://en.wikipedia.org/wiki/Protocol_(computing)">protocols</A>. That is to say, a particular implementation of a Twisted Protocol should implement one specific networking protocol, like <A href="http://en.wikipedia.org/wiki/File_Transfer_Protocol">FTP</A> or <A href="http://en.wikipedia.org/wiki/Internet_Message_Access_Protocol">IMAP</A> or some nameless protocol we invent for our own purposes. Our poetry protocol, such as it is, simply sends all the bytes of the poem as soon as a connection is established, while the close of the connection signifies the end of the poem.
+    Strictly speaking, each instance of a Twisted Protocol object implements a protocol for one <EM>specific</EM> connection. So each connection our program makes (or, in the case of servers, accepts) will require one instance of a Protocol. This makes Protocol instances the natural place to store both the state of "stateful" protocols and the accumulated data of partially received messages (since we receive the bytes in arbitrary-sized chunks with asynchronous I/O).
+    So how do Protocol instances know what connection they are responsible for? If you look at the <CODE>IProtocol</CODE> definition, you will find a method called <CODE>makeConnection</CODE>. This method is a callback and Twisted code calls it with a Transport instance as the only argument. The Transport is the connection the Protocol is going to use.
+    Twisted includes a large number of ready-built Protocol implementations for various common protocols. You can find a few simpler ones in <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py"><CODE>twisted.protocols.basic</CODE></A>. It's a good idea to check the Twisted sources before you write a new Protocol to see if there's already an implementation you can use. But if there isn't, it's perfectly OK to implement your own, as we will do for our poetry clients.
+    <H4>Protocol Factories
+    So each connection needs its own Protocol and that Protocol might be an instance of a class we implement ourselves. Since we will let Twisted handle creating the connections, Twisted needs a way to make the appropriate Protocol "on demand" whenever a new connection is made. Making Protocol instances is the job of Protocol Factories.
+    As you've probably guessed, the Protocol Factory API is defined by <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1259">IProtocolFactory</A>, also in the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py"><CODE>interfaces</CODE></A> module. Protocol Factories are an example of the <A href="http://en.wikipedia.org/wiki/Factory_pattern">Factory</A> design pattern and they work in a straightforward way. The <CODE>buildProtocol</CODE> method is supposed to return a new Protocol instance each time it is called. This is the method that Twisted uses to make a new Protocol for each new connection.
+    <H3>Get Poetry 2.0: First Blood.0
+    Alright, let's take a look at version 2.0 of the Twisted poetry client. The code is in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py"><CODE>twisted-client-2/get-poetry.py</CODE></A>. You can run it just like the others and get similar output so I won't bother posting output here. This is also the last version of the client that prints out task numbers as it receives bytes. By now it should be clear that all Twisted programs work by interleaving tasks and processing relatively small chunks of data at a time. We'll still use <CODE>print</CODE> statements to show what is going on at key moments, but the clients won't be quite as verbose in the future.
+    In client 2.0, sockets have disappeared. We don't even import the <CODE>socket</CODE> module and we never refer to a socket object, or a file descriptor, in any way. Instead, we tell the reactor to make the connections to the poetry servers on our behalf like <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L110">this</A>:
+    factory = PoetryClientFactory(len(addresses))
+
+    from twisted.internet import reactor
+
+    for address in addresses:
+        host, port = address
+        reactor.connectTCP(host, port, factory)
+    The <CODE>connectTCP</CODE> method is the one to focus on. The first two arguments should be self-explanatory. The third is an instance of our <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L69"><CODE>PoetryClientFactory</CODE></A> class. This is the Protocol Factory for poetry clients and passing it to the reactor allows Twisted to create instances of our <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L52"><CODE>PoetryProtocol</CODE></A> on demand.
+    Notice that we are not implementing either the Factory or the Protocol from scratch, unlike the <CODE>PoetrySocket</CODE> objects in our previous client. Instead, we are sub-classing the base implementations that Twisted provides in <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py"><CODE>twisted.internet.protocol</CODE></A>. The primary Factory base class is <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L24"><CODE>twisted.internet.protocol.Factory</CODE></A>, but we are using the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L103"><CODE>ClientFactory</CODE></A> sub-class which is specialized for clients (processes that make connections instead of listening for connections like a server).
+    We are also taking advantage of the fact that the Twisted <CODE>Factory</CODE> class implements <CODE>buildProtocol</CODE> for us. We call the base class implementation in our <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L79">sub-class</A>:
+    def buildProtocol(self, address):
+        proto = ClientFactory.buildProtocol(self, address)
+        proto.task_num = self.task_num
+        self.task_num += 1
+        return proto
+    How does the base class know what Protocol to build? Notice we are also setting the class attribute <CODE>protocol</CODE> on <CODE>PoetryClientFactory</CODE>:
+    class PoetryClientFactory(ClientFactory):
+
+        task_num = 1
+
+        protocol = PoetryProtocol # tell base class what proto to build
+    The base <CODE>Factory</CODE> class implements <CODE>buildProtocol</CODE> by instantiating the class we set on <CODE>protocol</CODE> (<CODE>i.e., PoetryProtocol</CODE>) and setting the <CODE>factory</CODE> attribute on that new instance to be a reference to its "parent" Factory. This is illustrated in Figure 8:<A name="figure8"></A>
+    <DIV id="attachment_1558" class="wp-caption aligncenter" style="width: 492px"><A href="./part5_files/protocols-1.png"><IMG class="size-full wp-image-1558" title="Figure 8: a Protocol is born" src="./part5_files/protocols-1.png" alt="Figure 8: a Protocol is born" width="482" height="358"></A><P class="wp-caption-text">Figure 8: a Protocol is born</DIV>
+    As we mentioned above, the <CODE>factory</CODE> attribute on Protocol objects allows Protocols created with the same Factory to share state. And since Factories are created by "user code", that same attribute allows Protocol objects to communicate results back to the code that initiated the request in the first place, as we will see in Part 6.
+    Note that while the <CODE>factory</CODE> attribute on Protocols refers to an instance of a Protocol Factory, the <CODE>protocol</CODE> attribute on the Factory refers to the <EM>class</EM> of the Protocol. In general, a single Factory might create many Protocol instances.
+    The second stage of Protocol construction connects a Protocol with a Transport, using the <CODE>makeConnection</CODE> method. We don't have to implement this method ourselves since the Twisted base class provides a default implementation. By default, <CODE>makeConnection</CODE> stores a reference to the Transport on the <CODE>transport</CODE> attribute and sets the <CODE>connected</CODE> attribute to a True value, as depicted in Figure 9:<A name="figure9"></A>
+    <DIV id="attachment_1564" class="wp-caption aligncenter" style="width: 501px"><A href="./part5_files/protocols-2.png"><IMG class="size-full wp-image-1564" title="Figure 9: a Protocol meets its Transport" src="./part5_files/protocols-2.png" alt="Figure 9: a Protocol meets its Transport" width="491" height="428"></A><P class="wp-caption-text">Figure 9: a Protocol meets its Transport</DIV>
+    Once initialized in this way, the Protocol can start performing its real job — translating a lower-level stream of data into a higher-level stream of protocol messages (and vice-versa for 2-way connections). The key method for processing incoming data is <CODE>dataReceived</CODE>, which our client implements like <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L57">this</A>:
+    def dataReceived(self, data):
+        self.poem += data
+        msg = 'Task %d: got %d bytes of poetry from %s'
+        print  msg % (self.task_num, len(data), self.transport.getHost())
+    Each time <CODE>dataReceived</CODE> is called we get a new sequence of bytes (<CODE>data</CODE>) in the form of a string. As always with asynchronous I/O, we don't know how much data we are going to get so we have to buffer it until we receive a complete protocol message. In our case, the poem isn't finished until the connection is closed, so we just keep adding the bytes to our <CODE>.poem</CODE> attribute.
+    Note we are using the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1341"><CODE>getHost</CODE></A> method on our Transport to identify which server the data is coming from. We are only doing this to be consistent with earlier clients. Otherwise our code wouldn't need to use the Transport explicitly at all, since we never send any data to the servers.
+    Let's take a quick look at what's going on when the <CODE>dataReceived</CODE> method is called. In the same directory as our 2.0 client, there is another client called <TT>twisted-client-2/get-poetry-stack.py</TT>. This is just like the 2.0 client except the <CODE>dataReceived</CODE> method has been changed like this:
+    def dataReceived(self, data):
+        traceback.print_stack()
+        os._exit(0)
+    With this change the program will print a stack trace and then quit the first time it receives some data. You could run this version like so:
+    python twisted-client-2/get-poetry-stack.py 10000
+    And you will get a stack trace like this:
+    File "twisted-client-2/get-poetry-stack.py", line 125, in
+        poetry_main()
+
+    ... # I removed a bunch of lines here
+
+    File ".../twisted/internet/tcp.py", line 463, in doRead  # Note the doRead callback
+        return self.protocol.dataReceived(data)
+    File "twisted-client-2/get-poetry-stack.py", line 58, in dataReceived
+        traceback.print_stack()
+    There's the <CODE>doRead</CODE> callback we used in client 1.0! As we noted before, Twisted builds new abstractions by using the old ones, not by replacing them. So there is still an <CODE>IReadDescriptor</CODE> implementation hard at work, it's just implemented by Twisted instead of our code. If you are curious, Twisted's implementation is in <TT>twisted.internet.tcp</TT>. If you follow the code, you'll find that the same object implements <CODE>IWriteDescriptor</CODE> and <CODE>ITransport</CODE> too. So the <CODE>IReadDescriptor</CODE> is actually the Transport object in disguise. We can visualize a <CODE>dataReceived</CODE> callback with Figure 10:
+    <DIV id="attachment_1578" class="wp-caption aligncenter" style="width: 349px"><A href="./part5_files/reactor-data-received.png"><IMG class="size-full wp-image-1578" title="Figure 10: the dataReceived callback" src="./part5_files/reactor-data-received.png" alt="Figure 10: the dataReceived callback" width="339" height="335"></A><P class="wp-caption-text">Figure 10: the dataReceived callback</DIV>
+    Once a poem has finished downloading, the <CODE>PoetryProtocol</CODE> object notifies its <CODE>PoetryClientFactory</CODE>:
+    def connectionLost(self, reason):
+        self.poemReceived(self.poem)
+
+    def poemReceived(self, poem):
+        self.factory.poem_finished(self.task_num, poem)
+    The <CODE>connectionLost</CODE> callback is invoked when the transport's connection is closed. The <CODE>reason</CODE> argument is a <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py"><CODE>twisted.python.failure.Failure</CODE></A> object with additional information on whether the connection was closed cleanly or due to an error. Our client just ignores this value and assumes we received the entire poem.
+    The factory shuts down the reactor after all the poems are done. Once again we assume the only thing our program is doing is downloading poems, which makes <CODE>PoetryClientFactory</CODE> objects less reusable. We'll fix that in the next Part, but notice how the <CODE>poem_finished</CODE> callback keeps track of the number of poems left to go:
+    ...
+        self.poetry_count -= 1
+
+        if self.poetry_count == 0:
+            ...
+    If we were writing a multi-threaded program where each poem was downloaded in a separate thread we would need to protect this section of code with a lock in case two or more threads invoked <CODE>poem_finished</CODE> at the same time. Otherwise we might end up shutting down the reactor twice (and getting a traceback for our troubles). But with a reactive system we needn't bother. The reactor can only make one callback at a time, so this problem just can't happen.
+    Our new client also handles a failure to connect with more grace than the 1.0 client. Here's the callback on the <CODE>PoetryClientFactory</CODE> class which does the job:
+    def clientConnectionFailed(self, connector, reason):
+        print 'Failed to connect to:', connector.getDestination()
+        self.poem_finished()
+    Note the callback is on the factory, not on the protocol. Since a protocol is only created after a connection is made, the factory gets the news when a connection cannot be established.
+    <H4>A simpler client
+    Although our new client is pretty simple already, we can make it simpler if we dispense with the task numbers. The client should really be about the poetry, after all. There is a simplified 2.1 version in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry-simple.py"><TT>twisted-client-2/get-poetry-simple.py</TT></A>.
+    <H3>Wrapping Up
+    Client 2.0 uses Twisted abstractions that should be familiar to any Twisted hacker. And if all we wanted was a command-line client that printed out some poetry and then quit, we could even stop here and call our program done. But if we wanted some re-usable code, some code that we could embed in a larger program that needs to download some poetry but also do other things, then we still have some work to do. In <A href="http://krondo.com/blog/?p=1595">Part 6</A> we'll take a first stab at it.
+    <H3>Suggested Exercises
+    <OL>
+    * Use <CODE>callLater</CODE> to make the client timeout if a poem hasn't finished after a given interval. Use the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1321"><CODE>loseConnection</CODE></A> method on the transport to close the connection on a timeout, and don't forget to cancel the timeout if the poem finishes on time.
+    * Use the stacktrace method to analyze the callback sequence that occurs when <CODE>connectionLost</CODE> is invoked.
+    </OL>

@@ -1,0 +1,224 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート5: もっと Twisted の詩を &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート6: さらなる高みへ" href="p06.html" />
+    <link rel="prev" title="パート4: Twisted で詩を" href="p04.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート5: もっと Twisted の詩を</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p04.html">パート4: Twisted で詩を</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p06.html">パート6: さらなる高みへ</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="twisted">
+<h1>パート5: もっと Twisted の詩を<a class="headerlink" href="#twisted" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id1">
+<h2>抽象的な表現技法<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>“<a class="reference internal" href="p04.html"><span class="doc">パート4: Twisted で詩を</span></a>”では Twisted を使った最初の詩のクライアントを作りました。ちゃんと動きますが、改善の余地は大いにあります。</p>
+<p>まず始めに、クライアントのコードにはネットワークソケットを生成したり、そのソケットからデータを受信するようなありふれたものが混ざっています。Twisted は、私たちが新しいプログラムを記述するときに毎回自力で実装する必要がないように、こうした類のことを助けてくれる機能を提供してくれます。非同期入出力では <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-1/get-poetry.py">クライアントコード</a> で見てきたようなちょっとトリッキーな例外処理を扱いますので、このサポートは特にありがたいものです。さらに、複数のプラットフォームで動作するようにしたいと思ったらさらにトリッキーなことが要求されます。暇な時間があれば、”win32” 用の Twisted のコードを眺めて、かのプラットフォームに独特の注意点がどれほどあるかを確認してください。</p>
+<p>現状のクライアントが持つもうひとつの問題点はエラーの扱いです。Twisted クライアントのバージョン 1.0 を動かしてみて、サーバが待ち受けていないポートからダウンロードさせてみてください。何も言わずにクラッシュしてしまいます。クライアントを直してもよいのですが、エラー処理は Twisted の API を使った方が簡単です。</p>
+<p>最後の問題点は、クライアントの再利用性がないことです。他のモジュールが詩を取得する場合にはどうしましょうか？「呼び出す」モジュールが詩のダウンロードが完了したことを知るにはどうしましょうか？詩の全てを読み込むまでブロックしてしまうような、単純に詩の文字列を返す関数を記述するわけにはいきません。実際的な問題ではありますが、今日のところは修正する気はありません。後のパートまでとっておきましょう。</p>
+<p>高レベルの API とインターフェイスを使って、ひとつ目とふたつ目の問題点を修正することにしましょう。Twisted フレームワークは疎結合な抽象化層から成っており、Twisted を学ぶとはこうした層が提供することを学ぶことなのです。つまり、API、インターフェイス、そして実装のそれぞれにおいて利用できることを学ぶ、ということです。ここで紹介することは入門用のことですので、それぞれの抽象化に関して徹底的に詳細まで学習する気はありませんし、くまなく調査する気もありません。Twisted を一緒に使うとラクチンだと思ってもらえるように、最も重要な部分に目を通していくだけです。Twisted のアーキテクチャを取り巻く形式に一旦慣れてしまうと、新しい部分を自習するのはずっと簡単になるでしょう。</p>
+<p>一般的に、それぞれの Twisted の抽象化はあるコンセプトと一緒に考えられます。たとえば、 <code class="docutils literal notranslate"><span class="pre">IReadDescriptor</span></code> を使ってパート４で記述した 1.0 のクライアントには、「読み込み可能なファイルディスクリプタ」という抽象化が見られます。Twisted の抽象化は、たいてい、どのように振舞うかを内包したオブジェクトを規定するインターフェイスで定義されます。Twisted の抽象化を学習するときに覚えておいて欲しい最も大事なことは次の通りです。</p>
+<blockquote>
+<div><p>「Twisted における最も高レベルの抽象化は、低レベルのものを <strong>使って</strong> 組み立てられています。置き換えでは <strong>ありません</strong> 。」</p>
+</div></blockquote>
+<p>このため、Twisted の新しい抽象化を学んでいくときは、それが何をするのかと何をしないのかの両方を気にかけてください。特に、早い時期に記述された抽象化 A が F という機能を実装しているなら、おそらく F はその他の抽象化では実装されていないでしょう。むしろ、他の B という抽象化が F を必要としているなら、F 自身を実装するのではなく A を使うことになるでしょう。(一般的には、B の実装は A の実装をサブクラス化したものか、A を実装する他のオブジェクトへの参照になるでしょう。)</p>
+<p>ネットワーキングは複雑な課題であり、それゆえに Twisted は多くの抽象化を持ちます。まずは低レベルから始めることで、動作する Twisted のプログラムにそれらの全てをまとめる方法をより明確に描けるようになっていけば良いと思います。</p>
+</div>
+<div class="section" id="id3">
+<h2>繰り返し思考<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>ここまで学んできた最も重要な抽象化は、実際には Twisted における最も重要な抽象化のことですが、reactor です。Twisted を使って構築されるすべてのプログラムの中心には、プログラムがどれほどたくさんの層をもっていようとも、回り続けてすべてのことを進めてくれる reactor ループがあります。Twisted は reactor が提供する機能以外のことを持ち合わせていません。実際、Twisted の他の部分のほとんどは、「reactor を使って X という何かを簡単にするための道具」だと考えられます。X は、「Web ページを提供すること」だったり「データベースへクエリを実行すること」だったり、その他特定の機能のことかもしれません。クライアント 1.0 がそうしているように、低レベルの API に固執することも可能ではありますが、自分たちでより多くのことを実装しなくてはいけません。高レベルの抽象化に移行すると、一般的には少ないコードの記述になります。(Twisted にプラットフォーム依存のややこしいことをやらせますしね。)</p>
+<p>しかし、Twisted の層の外で作業しているときは reactor が存在していることを簡単に忘れられます。それなりの大きさの Twisted プログラムでは、reactor API を直接使っている部分はごくわずかでしょう。他の低レベルの抽象化にも同じことが言えます。クライアント 1.0 で使ったファイルディスクリプタの抽象化は、より高レベルの概念によって完全に隠蔽されます。(内部では使われていますが、私たちが目にすることは滅多にありません。)</p>
+<p>ファイルディスクリプタの抽象化を使っている限りは、実際には問題とはなりません。Twisted に非同期入出力の機構を制御させておくと、私たちは解決すべき問題に集中できるようになります。しかし、reactor は違います。決して見えなくなることはありません。Twisted を使おうと決めることは、Reactor パターンを使うと決めることですし、コールバックと協調的マルチタスクを使う「reactive スタイル」のプログラミングを意図します。Twisted を正確に使いたいなら、reactor の存在 (と、どうやって動作しているのか) を気にしておかなくてはいけません。パート６でもっと詳しいことをやりますが、今のところは次のメッセージをあげましょう。</p>
+<blockquote>
+<div><p>この入門文書では、”<a class="reference internal" href="p02.html#figure5"><span class="std std-ref">図５：同期モデル</span></a>”と”<a class="reference internal" href="p03.html#figure6"><span class="std std-ref">図６：reactor がコールバックを扱う様子</span></a>”が最も重要なダイアグラムです。</p>
+</div></blockquote>
+<p>新しい概念を説明するためにダイアグラムを使い続けるでしょうが、これら二つの図は頭に叩き込んでおかなくてはいけません。私が Twisted を使ってプログラムを書くときには、いつも念頭においている図です。</p>
+<p>コードを見ていく前に、三つの新しい抽象化を紹介します。Transports と Protocols と Protocol Factories です。</p>
+<div class="section" id="transports">
+<h3>Transports<a class="headerlink" href="#transports" title="Permalink to this headline">¶</a></h3>
+<p>トランスポート層の抽象化は Twisted の中心となる <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py">interface</a> モジュールの <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1289">ITransport</a> で定義されています。Twisted のトランスポート層はバイトを送受信できる単一の接続を表現します。私たちの詩のクライアントにとっては、トランスポート層は <a class="reference external" href="http://en.wikipedia.org/wiki/Transmission_Control_Protocol">TCP</a> 接続を抽象化してくれます。以前は自分自身で実装していた類のものです。しかし、Twisted は <a class="reference external" href="http://en.wikipedia.org/wiki/Unix_pipe#Network_pipes">Unix パイプ</a> や <a class="reference external" href="http://en.wikipedia.org/wiki/Udp">UDP</a> ソケットなどを介した入出力も提供します。トランスポート層の抽象化はこのような接続のことを表し、それがどのような接続であろうとも非同期入出力の詳細なことを扱います。</p>
+<p><code class="docutils literal notranslate"><span class="pre">ITransport</span></code> で定義されているメソッドに目を通してみても、データを受信するようなコードが見つからないかもしれません。これは、トランスポート層は常に、低レベルな部分 (接続オブジェクトからデータを非同期に読み込むような部分) を処理し、コールバックを介して私たちにデータを渡すためです。似たようなことですが、トランスポートオブジェクトの書き込みに関するメソッドは、ブロッキングを避けるために即座にはデータを書き出さないようにするかもしれません。トランスポート層にデータを書き出すように知らせることは、「できる限り早くデータを送ってくれ、ただしブロッキングを避けるようにして」ということを意味します。もちろん、データは私たちが渡した通りの順番で書かれるでしょう。</p>
+<p>基本的に、私たちのコードに自分でトランスポートオブジェクトを実装することはありません。むしろ、Twisted がすでに提供してくれていて、reactor に接続をつないでもらうようにするときに生成される実装を使うことになります。</p>
+</div>
+<div class="section" id="protocols">
+<h3>Protocols<a class="headerlink" href="#protocols" title="Permalink to this headline">¶</a></h3>
+<p>Twisted のプロトコルは同じく <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py">interface</a> モジュールの <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1111">IProtocol</a> で定義されます。予想通り、プロトコルオブジェクトは <a class="reference external" href="http://en.wikipedia.org/wiki/Protocol_(computing)">プロトコル</a> を実装します。つまり、Twisted におけるプロトコルの特定の実装はあるネットワークプロトコル、 <a class="reference external" href="http://en.wikipedia.org/wiki/File_Transfer_Protocol">FTP</a> や <a class="reference external" href="http://en.wikipedia.org/wiki/Internet_Message_Access_Protocol">IMAP</a> や自分たちの目的のために作った名も無きプロトコルのようなもの、を実装すべきということです。私たちの詩のプロトコルはそのようなもののひとつですが、これは接続が確立されるとすぐに詩の全てのバイトを単純に送ります。一方で、接続が閉じられるのは詩の終わりです。</p>
+<p>厳密に言えば、それぞれの Twisted プロトコルのオブジェクトはある特定の接続のためのプロトコルを実装します。このため、プログラムで使う接続 (もしくは、サーバの場合には待ちうける接続になります) にはプロトコルのインスタンスがひとつ必要となります。こうすることで、プロトコルのインスタンスは「ステートフル」なプロトコルの状態を保持し、部分的に受信したメッセージのデータを蓄積するのに適したものになります。(非同期入出力で、あるデータサイズのバイト列を受け取るからです。)</p>
+<p>では、プロトコルのインスタンスは何の接続を受け持っているかをどのようにして知るのでしょうか？ <code class="docutils literal notranslate"><span class="pre">IProtocol</span></code> の定義を見てみると、 <code class="docutils literal notranslate"><span class="pre">makeConnection</span></code> と呼ばれるメソッドが見つかるでしょう。このメソッドはコールバックであり、トランスポートインスタンスを唯一の引数として、Twisted のコードが呼び出します。トランスポートはプロトコルが使おうとしている接続なのです。</p>
+<p>Twisted には一般的なプロトコルのためにたくさんのプロトコル実装が組み込まれています。 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py">twisted.protocol.basic</a> にいくつか簡単な実装があります。新しいプロトコルを書き始める前に Twisted のソースを確認してみるのは良い考えです。利用可能な実装がすでにあるかもしれません。しかし、なかったとしても自分で実装すれば何も問題ありません。詩のクライアントでやっていくことにしましょう。</p>
+</div>
+<div class="section" id="protocol-factories">
+<h3>Protocol Factories<a class="headerlink" href="#protocol-factories" title="Permalink to this headline">¶</a></h3>
+<p>それぞれの接続にはプロトコルが必要であり、プロトコルは私たちが実装するクラスのインスタンスかもしれません。Twisted に接続を管理させますので、新しい接続が作られたときはいつでもその場その場で適切なプロトコルを生成する方法が必要です。プロトコルのインスタンスを作るのはプロトコルファクトリの仕事です。</p>
+<p>たぶん推察の通り、プロトコルファクトリ API は <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py">interface</a> モジュールの <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1259">IProtocolFactory</a> で定義されます。プロトコルファクトリはデザインパターンの <a class="reference external" href="http://en.wikipedia.org/wiki/Factory_pattern">Factory</a> の一例であり、その通りに動作します。 <code class="docutils literal notranslate"><span class="pre">buildProtocol</span></code> メソッドは呼び出される度に新しいプロトコルインスタンスを返すことになっています。これは、新しい接続の度に新しいプロトコルインスタンスを生成するために Twisted が使うメソッドです。</p>
+</div>
+</div>
+<div class="section" id="blood-0">
+<h2>詩を取得するクライアント 2.0: まずは Blood.0<a class="headerlink" href="#blood-0" title="Permalink to this headline">¶</a></h2>
+<p>よし、それでは Twisted の詩のクライアントのバージョン 2.0 を見ていきましょう。コードは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py">twisted-client-2/get-poetry.py</a> にあります。他のものと同様に動かすことができ、煩雑なので載せませんが、似たような出力になるでしょう。これは、バイトを受信するとタスク番号を出力する最後のバージョンになります。ここまでは、全ての Twisted プログラムは交互にタスクを実行し、一度に比較的小さなデータのかたまりしか処理しませんでした。これからも大事な局面では何が起こっているかを表示するために <code class="docutils literal notranslate"><span class="pre">print</span></code> 文を使っていきますが、冗長な出力はやめます。</p>
+<p>バージョン 2.0 のクライアントでは、ソケットが見えなくなりました。 <code class="docutils literal notranslate"><span class="pre">socket</span></code> モジュールをインポートすらしていませんし、ソケットオブジェクトやファイルディスクリプタなどを参照しません。その代わりに、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L110">このようにして</a> reactor に詩のサーバに接続するように伝えています。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">factory</span> <span class="o">=</span> <span class="n">PoetryClientFactory</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">addresses</span><span class="p">))</span>
+
+<span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+<span class="k">for</span> <span class="n">address</span> <span class="ow">in</span> <span class="n">addresses</span><span class="p">:</span>
+    <span class="n">host</span><span class="p">,</span> <span class="n">port</span> <span class="o">=</span> <span class="n">address</span>
+    <span class="n">reactor</span><span class="o">.</span><span class="n">connectTCP</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">,</span> <span class="n">factory</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">connectTCP</span></code> メソッドに注目してください。最初のふたつの引数は見たままです。三つ目の引数は私たちの <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L69">PoetryClientFactory</a> のインスタンスです。これは詩のクライアントのプロトコルファクトリであり、Twisted が必要に応じて私たちの <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L52">PoetryProtocol</a> インスタンスを生成できるように reactor に渡します。</p>
+<p>以前のクライアントにおける <code class="docutils literal notranslate"><span class="pre">PoetrySocket</span></code> オブジェクトとは違い、ファクトリもプロトコルもスクラッチから実装しているわけではないことに気をつけてください。その代わりに、Twisted が <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py">twisted.internet.protocol</a> で提供しているベース実装をサブクラス化しています。基本となるファクトリの基底クラスは <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L24">twisted.internet.protocol.Factory</a> ですが、私たちはクライアントに特化されたサブクラスである <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L103">ClientFactory</a> を使っています。(サーバのように接続を待ち受けるのではなく、接続を生成します。)</p>
+<p>Twisted の <code class="docutils literal notranslate"><span class="pre">Factory</span></code> クラスは <code class="docutils literal notranslate"><span class="pre">buildProtocol</span></code> を実装しているという利点も享受できます。私たちの <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L79">サブクラス</a> 内で基底クラスの実装を呼び出すのです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">buildProtocol</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">address</span><span class="p">):</span>
+    <span class="n">proto</span> <span class="o">=</span> <span class="n">ClientFactory</span><span class="o">.</span><span class="n">buildProtocol</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">address</span><span class="p">)</span>
+    <span class="n">proto</span><span class="o">.</span><span class="n">task_num</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">task_num</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">task_num</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">proto</span>
+</pre></div>
+</div>
+<p>基底クラスは何のプロトコルを構築するかをどのようにして知るのでしょうか？ <code class="docutils literal notranslate"><span class="pre">PoetryClientFactory</span></code> の <code class="docutils literal notranslate"><span class="pre">protocol</span></code> 属性を設定しているのです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryClientFactory</span><span class="p">(</span><span class="n">ClientFactory</span><span class="p">):</span>
+
+    <span class="n">task_num</span> <span class="o">=</span> <span class="mi">1</span>
+
+    <span class="n">protocol</span> <span class="o">=</span> <span class="n">PoetryProtocol</span> <span class="c1"># tell base class what proto to build</span>
+</pre></div>
+</div>
+<p>基底 <code class="docutils literal notranslate"><span class="pre">Factory</span></code> クラスは、 <code class="docutils literal notranslate"><span class="pre">protocol</span></code> 属性に設定したクラス (つまり <code class="docutils literal notranslate"><span class="pre">PoetryProtocol</span></code> のことです) をインスタンス化し、新しいインスタンスにおける <code class="docutils literal notranslate"><span class="pre">factory</span></code> 属性をその「親」のファクトリへの参照になるように設定することで <code class="docutils literal notranslate"><span class="pre">buildProtocol</span></code> を実装します。この様子を図８に示します。</p>
+<div class="figure align-default" id="id11">
+<span id="figure8"></span><img alt="_images/p05_protocols-1.png" src="_images/p05_protocols-1.png" />
+<p class="caption"><span class="caption-text">図８：プロトコルが生成されるとき</span><a class="headerlink" href="#id11" title="Permalink to this image">¶</a></p>
+</div>
+<p>上で述べたように、プロトコルオブジェクトの <code class="docutils literal notranslate"><span class="pre">factory</span></code> 属性は、同じファクトリから作られたプロトコルに状態を共有させます。ファクトリは「ユーザコード」で生成されますので、同じ属性がプロトコルオブジェクトに通信を許可することにより、リクエストの初期化が最初に発生した時点でコードに結果を返します。これはパート６で見ていきます。</p>
+<p>プロトコルの <code class="docutils literal notranslate"><span class="pre">factory</span></code> 属性はプロトコルファクトリのインスタンスを参照しますが、ファクトリの <code class="docutils literal notranslate"><span class="pre">protocol</span></code> 属性はプロトコルのクラスを参照します。一般には、単一のファクトリは複数のプロトコルインスタンスを生成するでしょう。</p>
+<p>プロトコル生成の二番目の段階では、 <code class="docutils literal notranslate"><span class="pre">makeConnection</span></code> メソッドを使って、Transport を持ったプロトコルに接続します。このメソッドを自分で実装する必要はありません。Twisted の基底クラスが標準の実装を提供してくれるからです。初期設定では、 <code class="docutils literal notranslate"><span class="pre">makeConnection</span></code> は <code class="docutils literal notranslate"><span class="pre">transport</span></code> 属性の Transport への参照を保存し、 <code class="docutils literal notranslate"><span class="pre">connected</span></code> 属性を真 (True) に設定します。図９にその様子を描きました。</p>
+<div class="figure align-default" id="id12">
+<span id="figure9"></span><img alt="_images/p05_protocols-2.png" src="_images/p05_protocols-2.png" />
+<p class="caption"><span class="caption-text">図９：プロトコルと Transport の出会い</span><a class="headerlink" href="#id12" title="Permalink to this image">¶</a></p>
+</div>
+<p>この方法で一旦初期化されると、プロトコルは実際の仕事に取り掛かれます。低レベルのデータの流れを高レベルのプロトコルメッセージの流れに変換する (逆も同様です) ことです。入力データを処理するために鍵となるメソッドは <code class="docutils literal notranslate"><span class="pre">dataReceived</span></code> です。これは私たちのクライアントでは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry.py#L57">このように</a> 実装しています。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">dataReceived</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">poem</span> <span class="o">+=</span> <span class="n">data</span>
+    <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Task </span><span class="si">%d</span><span class="s1">: got </span><span class="si">%d</span><span class="s1"> bytes of poetry from </span><span class="si">%s</span><span class="s1">&#39;</span>
+    <span class="nb">print</span>  <span class="n">msg</span> <span class="o">%</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">task_num</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">getHost</span><span class="p">())</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">dataReceived</span></code> が呼ばれる度に文字列形式で新しいバイト列 (<code class="docutils literal notranslate"><span class="pre">data</span></code>) を得ます。非同期入出力にはつきものですが、どれくらいのデータを受け取るかを知るすべはありませんので、完全なプロトコルメッセージを受け取るまでバッファに溜めなくていけません。私たちの場合だと、詩は接続が閉じられるまで終わりませんので、 <code class="docutils literal notranslate"><span class="pre">.poem</span></code> 属性にバイトを追加し続けます。</p>
+<p>どのサーバから届いたデータかを区別するために Transport の <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1341">getHost</a> メソッドを使っています。これは、前のクライアントとの一貫性のためにやっているだけです。そうでなければ Transport を明示的に使う必要は全くありません。サーバへ何もデータを送らないからです。</p>
+<p><code class="docutils literal notranslate"><span class="pre">dataReceived</span></code> メソッドが呼ばれたときに何が起こっているかをちょっと見ていきましょう。バージョン 2.0 のクライアントと同じディレクトリに <code class="docutils literal notranslate"><span class="pre">twisted-client-2/get-poetry-stack.py</span></code> というもう一つのクライアントがあります。 <code class="docutils literal notranslate"><span class="pre">dataReceived</span></code> メソッドが次のように変更された以外は、2.0 のクライアントのようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">dataReceived</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+    <span class="n">traceback</span><span class="o">.</span><span class="n">print_stack</span><span class="p">()</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">_exit</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>この変更によってプログラムはスタックトレースを出力します。そして、データを受け取った最初のタイミングで終了します。このバージョンを動かしてみるとこんな感じになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">client</span><span class="o">-</span><span class="mi">2</span><span class="o">/</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">-</span><span class="n">stack</span><span class="o">.</span><span class="n">py</span> <span class="mi">10000</span>
+</pre></div>
+</div>
+<p>次のようなスタックトレースが得られるでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">File</span> <span class="s2">&quot;twisted-client-2/get-poetry-stack.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">125</span><span class="p">,</span> <span class="ow">in</span>
+    <span class="n">poetry_main</span><span class="p">()</span>
+
+<span class="o">...</span> <span class="c1"># I removed a bunch of lines here</span>
+
+<span class="n">File</span> <span class="s2">&quot;.../twisted/internet/tcp.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">463</span><span class="p">,</span> <span class="ow">in</span> <span class="n">doRead</span>  <span class="c1"># Note the doRead callback</span>
+    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">protocol</span><span class="o">.</span><span class="n">dataReceived</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<span class="n">File</span> <span class="s2">&quot;twisted-client-2/get-poetry-stack.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">58</span><span class="p">,</span> <span class="ow">in</span> <span class="n">dataReceived</span>
+    <span class="n">traceback</span><span class="o">.</span><span class="n">print_stack</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>1.0 のクライアントで使った <code class="docutils literal notranslate"><span class="pre">doRead</span></code> コールバックがありますね！前にも述べたように、Twisted は既存の機能を置き換えるのではなくそれらを使って新しい抽象化層を組み立てます。ですから、今でも <code class="docutils literal notranslate"><span class="pre">IReadDescriptor</span></code> の実装はしっかりと動作していますし、私たちのコードではなく、Twisted によって実装されているのです。もし興味をもったなら、Twisted の実装は <code class="docutils literal notranslate"><span class="pre">twisted.internet.tcp</span></code> の中にあります。コードを追いかけてみると、 <code class="docutils literal notranslate"><span class="pre">IWriteDescriptor</span></code> と <code class="docutils literal notranslate"><span class="pre">ITransport</span></code> を実装する同じオブジェクトを目にするでしょう。このため、 <code class="docutils literal notranslate"><span class="pre">IReadDescriptor</span></code> は実際には見せかけの Transport オブジェクトです。 <code class="docutils literal notranslate"><span class="pre">dataReceived</span></code> コールバックは図１０のように表せます。</p>
+<div class="figure align-default" id="id13">
+<span id="figure10"></span><img alt="_images/p05_reactor-data-received.png" src="_images/p05_reactor-data-received.png" />
+<p class="caption"><span class="caption-text">図１０： <code class="docutils literal notranslate"><span class="pre">dataReceived</span></code> コールバック</span><a class="headerlink" href="#id13" title="Permalink to this image">¶</a></p>
+</div>
+<p>詩をダウンロードし終えると <code class="docutils literal notranslate"><span class="pre">PoetryProtocol</span></code> オブジェクトは <code class="docutils literal notranslate"><span class="pre">PoetryClientFactory</span></code> に知らせます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">connectionLost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reason</span><span class="p">):</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">poemReceived</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">poem</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">poemReceived</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">poem_finished</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">task_num</span><span class="p">,</span> <span class="n">poem</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>トランスポートの接続が閉じられるときは <code class="docutils literal notranslate"><span class="pre">connectionLost</span></code> コールバックが関係してきます。 <code class="docutils literal notranslate"><span class="pre">reason</span></code> 引数は接続がきれいに閉じられたのかエラーのせいなのかという追加情報を持つ <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py">twisted.python.failure.Failure</a> オブジェクトです。私たちのクライアントは単にこの値を無視するだけで、詩を受信しきったと仮定します。</p>
+<p>全ての詩をダウンロードし終えると、ファクトリは reactor を終了させます。私たちのプログラムがやっていることといえば詩をダウンロードしているだけ、ということをもう一度確認してください。これでは <code class="docutils literal notranslate"><span class="pre">PoetryClientFactory</span></code> オブジェクトの再利用性が低くなってしまいます。次のパートで修正するとして、ここでは <code class="docutils literal notranslate"><span class="pre">poem_finished</span></code> コールバックが詩の数を追いかけている方法に着目してください。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">...</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">poetry_count</span> <span class="o">-=</span> <span class="mi">1</span>
+
+    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">poetry_count</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+<p>それぞれの詩が別々のスレッドでダウンロードされるようなマルチスレッドプログラムを書いていたとすれば、ふたつ以上のスレッドが <code class="docutils literal notranslate"><span class="pre">poem_finished</span></code> を同時に呼び出さないように、この部分のコードをロックで保護する必要があります。さもないと、reactor を二回終了させることになるかもしれません (そんな問題のためにトレースバックを得られるわけですが)。しかし、reactive システムではそんな面倒なことは必要ありません。reactor は一度にひとつのコールバックしか操作しませんので、このような問題は起こりようもありません。</p>
+<p>新しいクライアントは 1.0 クライアントよりも寛容に接続の失敗も扱います。その部分を実行する <code class="docutils literal notranslate"><span class="pre">PoetryClientFactory</span></code> クラスにおけるコールバックは次の通りです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">clientConnectionFailed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">connector</span><span class="p">,</span> <span class="n">reason</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;Failed to connect to:&#39;</span><span class="p">,</span> <span class="n">connector</span><span class="o">.</span><span class="n">getDestination</span><span class="p">()</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">poem_finished</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>コールバックはファクトリにあり、プロトコルではないことに注目してください。プロトコルは接続が確立された後にしか生成されませんので、接続を確立できないことを知るのはファクトリ、ということになります。</p>
+<div class="section" id="id8">
+<h3>もっと簡単なクライアント<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h3>
+<p>新しいクライアントはすでに非常に簡単ですが、タスク番号を意識しなくてよければ、もっと簡単にできます。結局のところ、クライアントは正に詩そのものになるでしょう。簡略化されたバージョン 2.1 の実装は <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-2/get-poetry-simple.py">twisted-client-2/get-poetry-simple.py</a> にあります。</p>
+</div>
+</div>
+<div class="section" id="id9">
+<h2>まとめ<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h2>
+<p>クライアント 2.0 は、すべての Twisted ハッカーが慣れ親しんでおくべき Twisted の抽象化を使います。もし、いくつかの詩を出力して終了するようなコマンドラインクライアントで十分なら、ここで止めてしまってプログラムは出来上がったことにしてしまえます。しかし、再利用できるコード、つまり、いくつかの詩をダウンロードしてほかの何かも実行するような大規模なプログラムに組み込めるコードが欲しいとなると、やるべきことはまだあります。”<a class="reference internal" href="p06.html"><span class="doc">パート6: さらなる高みへ</span></a>”ではそこに焦点を当てることにしましょう。</p>
+</div>
+<div class="section" id="id10">
+<h2>おすすめの練習問題<a class="headerlink" href="#id10" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>指定された時間が経過しても詩をダウンロードし終えないときはクライアントにタイムアウトさせるために <code class="docutils literal notranslate"><span class="pre">callLater</span></code> を使ってください。タイムアウトで接続を閉じるためにはトランスポートの <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1321">loseConnection</a> メソッドを使ってください。なお、時間内に詩をダウンロードし終えたらタイムアウトをキャンセルすることを忘れないでくださいね。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">connectionLost</span></code> が呼び出されたときに発生するコールバックの呼び出し順序を解析するため、スタックトレースメソッドを使ってください。</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p04.html">パート4: Twisted で詩を</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p06.html">パート6: さらなる高みへ</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

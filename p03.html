@@ -1,0 +1,268 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート3: 目を向けてみましょう &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート4: Twisted で詩を" href="p04.html" />
+    <link rel="prev" title="パート2: ゆったりした詩と世紀末" href="p02.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート3: 目を向けてみましょう</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p02.html">パート2: ゆったりした詩と世紀末</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p04.html">パート4: Twisted で詩を</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="id1">
+<h1>パート3: 目を向けてみましょう<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="twisted">
+<h2>何もしない、Twisted なやり方<a class="headerlink" href="#twisted" title="Permalink to this headline">¶</a></h2>
+<p>それでは、Twisted を使って非同期に詩を取得するクライアントを再実装していきましょう。とその前に、雰囲気をつかむために本当に単純な Twisted のプログラムを書いてみましょう。パート２で述べたように、紹介するコード例は Twisted 8.2.0 を使って開発しました。Twisted の API は変わっていくものですが、使おうとしている中心的な API はなかなか変わらないでしょう。例え変わったとしても、ここで紹介するコード例は将来のリリースでも動くと思います。Twisted をインストールしていなければ、 <a class="reference external" href="http://twistedmatrix.com/trac/wiki/Downloads">ここ</a> から入手してください。</p>
+<p>もっとも単純な Twisted のプログラムを以下に示します。 <code class="docutils literal notranslate"><span class="pre">twisted-intro</span></code> の一番上のディレクトリから見て <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/simple.py">basic-twisted/simple.py</a> にあります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>次のようにして実行できます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">basic</span><span class="o">-</span><span class="n">twisted</span><span class="o">/</span><span class="n">simple</span><span class="o">.</span><span class="n">py</span>
+</pre></div>
+</div>
+<p>“<a class="reference internal" href="p02.html"><span class="doc">パート2: ゆったりした詩と世紀末</span></a>”でみたように、Twisted は <a class="reference external" href="http://en.wikipedia.org/wiki/Reactor_pattern">Reactor Pattern</a> の実装であり、reactor もしくはイベントループを表すオブジェクトを持ちます。これはすべての Twisted プログラムで核となるものです、一番最初の行で <code class="docutils literal notranslate"><span class="pre">reactor</span></code> オブジェクトを使えるようにし、二行目で reactor にループを開始するように伝えます。</p>
+<p>このプログラムは何もしないで居座っているだけです。 <code class="docutils literal notranslate"><span class="pre">Control-C</span></code> を押すと止められますが、そうしなければ延々と実行を続けるでしょう。普通は入出力を監視したいひとつ以上のファイルディスクリプタ (詩のサーバにつないであると考えてください) をループに与えます。その方法は後で見ていくとして、ここでは reactor ループをそのままでにしておきます。繰り返しを続ける <a class="reference external" href="http://en.wikipedia.org/wiki/Busy_waiting">busy loop</a> ではないことに注意してください。CPU の動作状況を表示できるようなら、技術的には無限ループによって発生するスパイク現象が起きていないことが分かるでしょう。実際、ここで示したプログラムはまったく CPU を使っていません。その代わりに、reactor は”<a class="reference internal" href="p02.html#figure5"><span class="std std-ref">図５：同期モデル</span></a>”における上部分のサイクルに留まっています。決して発生することのないイベントを待ちながら、です。(厳密に言えば、存在しないファイルディスクリプタに対する <code class="docutils literal notranslate"><span class="pre">select</span></code> 呼び出しを待っています)</p>
+<p>Hamletian inaction のメタファーを想起させるかもしれませんが、未だにどうしようもなくかわいらしいプログラムです。もっとおもしろいものにしていきたいところですが、すでにいくつか分かったことがあります。</p>
+<ol class="arabic simple">
+<li><p>Twisted の reactor ループは指示が与えられるまで開始しません。 <code class="docutils literal notranslate"><span class="pre">reactor.run()</span></code> を呼び出すことで開始させます。</p></li>
+<li><p>reactor ループは開始されたのと同じスレッドで実行されます。ここでの場合、main スレッド (しかもここだけ) で実行されます。</p></li>
+<li><p>いったんループが開始すると、そのまま動き続けます。reactor はプログラム (もしくは開始された特定のスレッド) の「支配下」にあります。</p></li>
+<li><p>何もすることがなければ、reactor ループは CPU を消費しません。</p></li>
+<li><p>reactor は明示的に作られません。import するだけです。</p></li>
+</ol>
+<p>最後の点は詳しく説明する価値があります。Twisted では、reactor は基本的に <a class="reference external" href="http://en.wikipedia.org/wiki/Singleton_pattern">シングルトン</a> です。唯一の reactor オブジェクトしかなく、import したときに暗黙的に作成されます。 <code class="docutils literal notranslate"><span class="pre">twisted.internet</span></code> パッケージの <code class="docutils literal notranslate"><span class="pre">reactor</span></code> モジュールを見てみると、とても小さなコードを確認できるでしょう。実際の実装は他のファイル (<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/selectreactor.py">twisted.internet.selectreactor</a>) にあります。</p>
+<p>実は、Twisted には複数の reactor の実装があります。パート２で紹介したように、 <code class="docutils literal notranslate"><span class="pre">select</span></code> の呼び出しはファイルディスクリプタを待ち受けるひとつの方法に過ぎません。Twisted が使うデフォルトの実装ではありますが、他の方法を使う reactor を有効にすることもできます。例えば <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/pollreactor.py">twisted.internet.pollreactor</a> は <code class="docutils literal notranslate"><span class="pre">select</span></code> ではなく <code class="docutils literal notranslate"><span class="pre">poll</span></code> システムコールを使います。</p>
+<p>異なる reactor の実装を使うためには、 <code class="docutils literal notranslate"><span class="pre">twisted.internet.reactor</span></code> を有効にする前に <code class="docutils literal notranslate"><span class="pre">install</span></code> しておきます。 <code class="docutils literal notranslate"><span class="pre">pollreactor</span></code> をインストールするには次のようにします。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">pollreactor</span>
+<span class="n">pollreactor</span><span class="o">.</span><span class="n">install</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>特定の reactor の実装を最初にインストールしないで <code class="docutils literal notranslate"><span class="pre">twisted.internet.reactor</span></code> を import すると、Twisted は <code class="docutils literal notranslate"><span class="pre">selectreactor</span></code> をインストールするでしょう。このため、誤ってデフォルトの reactor をインストールしてしまうことを避けるため、モジュールの最上位で reactor をインポートしないのが一般的なやり方です。そうではなく、使うのと同じスコープで reactor を import します。</p>
+<blockquote>
+<div><p>執筆時点では、Twisted は複数の reactor が共存することを許すようなアーキテクチャに徐々に移行しています。
+この考え方においては、reactor オブジェクトはモジュールから import されるのではなく、参照で渡されるようになるでしょう。</p>
+</div></blockquote>
+<p>それでは <code class="docutils literal notranslate"><span class="pre">pollreactor</span></code> を使って最初の Twisted プログラムを再実装できますね。 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/simple-poll.py">basic-twisted/simple-poll.py</a> を見てください。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">pollreactor</span>
+<span class="n">pollreactor</span><span class="o">.</span><span class="n">install</span><span class="p">()</span>
+
+<span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>何もしない <code class="docutils literal notranslate"><span class="pre">select</span></code> ループの代わりに何もしない <code class="docutils literal notranslate"><span class="pre">poll</span></code> ループを使うようになった、ということです。かっこいい！</p>
+<p>この入門の以降の部分ではデフォルトの reactor を使うことにします。Twisted を学ぶという目的においては、どの reactor でも同じことです。</p>
+</div>
+<div class="section" id="id4">
+<h2>こんにちは Twisted<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>とりあえず何かする Twisted プログラムを作ってみましょう。端末にメッセージを表示するものは次のようになります。もちろん reactor ループが開始された後に、です。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">hello</span><span class="p">():</span>
+    <span class="nb">print</span> <span class="s1">&#39;Hello from the reactor loop!&#39;</span>
+    <span class="nb">print</span> <span class="s1">&#39;Lately I feel like I</span><span class="se">\&#39;</span><span class="s1">m stuck in a rut.&#39;</span>
+
+<span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+<span class="n">reactor</span><span class="o">.</span><span class="n">callWhenRunning</span><span class="p">(</span><span class="n">hello</span><span class="p">)</span>
+
+<span class="nb">print</span> <span class="s1">&#39;Starting the reactor.&#39;</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>このプログラムは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/hello.py">basic-twisted/hello.py</a> に置いてあります。実行してみると次の出力を得られるでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Starting the reactor.
+Hello from the reactor loop!
+Lately I feel like I&#39;m stuck in a rut.
+</pre></div>
+</div>
+<p>プログラムは、画面に出力したあとも動作を続けますので、手動で停止させなくてはなりません。</p>
+<p><code class="docutils literal notranslate"><span class="pre">hello</span></code> 関数は reactor が動き始めた後に呼ばれることに注意してください。Twisted のコードが私たちのコードを呼び出さなくてはいけませんので、reactor そのものに呼び出されるということです。Twisted に呼び出して欲しい関数への参照を reactor メソッド <code class="docutils literal notranslate"><span class="pre">callWhenRunning</span></code> に渡すことで、動作を変更できます。もちろん、reactor を動かす前にやらなくてはいけません。</p>
+<p><code class="docutils literal notranslate"><span class="pre">hello</span></code> 関数への参照にはコールバック (<em>callback</em>) という用語を使います。コールバックは Twisted が適当なときに後で呼び出す (“call us back”) ように Twisted (もしくは他のフレームワークでも) に与える関数への参照です。この場合は reactor ループが開始した直後です。Twisted のループは私たちが記述するコードとは分離されていますので、reactor の中心となる部分とビジネスロジックの部分のやり取りのほとんどは、様々な API を使って Twisted に与えたコールバック関数から始まります。</p>
+<p>次のプログラムで、Twisted が私たちが記述するコードを呼び出す様子を確認できます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">traceback</span>
+
+<span class="k">def</span> <span class="nf">stack</span><span class="p">():</span>
+    <span class="nb">print</span> <span class="s1">&#39;The python stack:&#39;</span>
+    <span class="n">traceback</span><span class="o">.</span><span class="n">print_stack</span><span class="p">()</span>
+
+<span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">callWhenRunning</span><span class="p">(</span><span class="n">stack</span><span class="p">)</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>このコードは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/stack.py">basic-twisted/stack.py</a> にあり、次のような出力を表示します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">The</span> <span class="n">python</span> <span class="n">stack</span><span class="p">:</span>
+<span class="o">...</span>
+  <span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span> <span class="o">&lt;--</span> <span class="n">This</span> <span class="ow">is</span> <span class="n">where</span> <span class="n">we</span> <span class="n">called</span> <span class="n">the</span> <span class="n">reactor</span>
+<span class="o">...</span>
+<span class="o">...</span>  <span class="o">&lt;--</span> <span class="n">A</span> <span class="n">bunch</span> <span class="n">of</span> <span class="n">Twisted</span> <span class="n">function</span> <span class="n">calls</span>
+<span class="o">...</span>
+  <span class="n">traceback</span><span class="o">.</span><span class="n">print_stack</span><span class="p">()</span> <span class="o">&lt;--</span> <span class="n">The</span> <span class="n">second</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">the</span> <span class="n">stack</span> <span class="n">function</span>
+</pre></div>
+</div>
+<p>途中の全ての Twisted の呼び出しを気にすることはありません。 <code class="docutils literal notranslate"><span class="pre">reactor.run()</span></code> と私たちが渡したコールバックの関係にだけ気をつけてください。</p>
+<blockquote>
+<div><p><em>コールバックとはどのように向き合うべきでしょうか？</em>
+Twisted だけがコールバックを使う reactor フレームワークというわけではありません。
+もっとも古い Python の非同期フレームワークである <a class="reference external" href="http://www.nightmare.com/medusa/">Medusa</a> と <a class="reference external" href="http://docs.python.org/library/asyncore.html#module-asyncore">asyncore</a> もコールバックを使います。
+たくさんの GUI フレームワークのように、GUI ツールキットである <a class="reference external" href="http://gtk.org/">GTK</a> と <a class="reference external" href="http://qt.nokia.com/">QT</a> も reactor ループ上で動きます。</p>
+</div></blockquote>
+<p>reactive system の開発者は間違いなくコールバックが好きです。たぶん結婚すべきでしょうし、すでにそうしているかもしれませんね。しかし、次のことを頭に入れておいてください。</p>
+<ol class="arabic simple">
+<li><p>reactor パターンはシングルスレッドです。</p></li>
+<li><p>Twisted のような reactive フレームワークは、私たちが独自に実装しなくてもよいように reactor ループを実装しています。</p></li>
+<li><p>私たちのコードはビジネスロジックを実装して呼ばれるようにします。</p></li>
+<li><p>シングルスレッドの制御下にありますので、reactor ループは私たちのコードを呼び出さなくてはいけなくなるでしょう。</p></li>
+<li><p>reactor には、私たちのコードのどの部分が呼び出されるべきかを前もって知る術はありません。</p></li>
+</ol>
+<p>このような状況ではコールバックは単なるオプションではありません。実際にできることといったらこれだけです。</p>
+<p>図６はコールバックの最中に何が起こっているかを表しています。</p>
+<div class="figure align-default" id="id10">
+<span id="figure6"></span><img alt="_images/p03_reactor-callback.png" src="_images/p03_reactor-callback.png" />
+<p class="caption"><span class="caption-text">図６：reactor がコールバックを扱う様子</span><a class="headerlink" href="#id10" title="Permalink to this image">¶</a></p>
+</div>
+<p>図６はコールバックのいくつかの重要な性質を描き出しています。</p>
+<ol class="arabic simple">
+<li><p>私たちのコールバックのコードは Twisted のループと同じスレッドで動きます。</p></li>
+<li><p>コールバックが動いているとき、Twisted のループは動いていません。</p></li>
+<li><p>逆もまた然りです。</p></li>
+<li><p>コールバックが処理を戻すと reactor ループは再開します。</p></li>
+</ol>
+<p>コールバックの間、Twisted のループは私たちのコード上で結果的にブロックされます。このため、コールバックのコードがいかなる時間も無駄にしないようにしなくてはいけないでしょう。特に、入出力を待つような呼び出し (blocking I/O calls) は避けるべきでしょう。さもなければ、reactor パターンを使っている全ての部分で思わぬ性能の劣化を招いてしまうでしょう。Twisted は私たちのコードがブロックしないように特別な事前注意を促さないでしょうから、私たち自身が確実に注意を払わなくてはいけません。これから時々出会わすように、一般的なネットワークを介した入出力では Twisted に非同期通信をやらせるので、私たちがその難しさを気にする必要はありません。</p>
+<p>潜在的にブロッキングする操作の他の例としては、ソケットではないファイルディスクリプタ (パイプなど) からの読み書きや、サブプロセスが完了するのを待つことがあります。ブロッキングからノンブロッキング操作に切り替える方法は、何をしているか次第ではありますが、Twisted の API がその助けになることもしばしばあります。なお、多くの Python 標準関数にはノンブロッキングモードに切り替える方法はありません。例えば、 <code class="docutils literal notranslate"><span class="pre">os.system</span></code> 関数はサブプロセスが完了するまで常にブロックします。まさに動作している通りです。Twisted を使う上では、 サブプロセスを立ち上げるためには Twisted API のやり方で <code class="docutils literal notranslate"><span class="pre">os.system</span></code> を避けるようにしなくてはいけません。</p>
+</div>
+<div class="section" id="id5">
+<h2>さよなら Twisted<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>reactor の <code class="docutils literal notranslate"><span class="pre">stop</span></code> メソッドを使って Twisted の reactor に止まってもらいましょう。しかし、いったん停止した reactor は再起動できませんので、一般的には、プログラムが処理を終了するときにのみそうするべきでしょう。</p>
+<blockquote>
+<div><p>Twisted のメーリングリストで、自由に開始や停止できるように reactor を再起動可能にすべきか、という議論がありました。しかし、バージョン 8.2.0 の時点では reactor を開始 (したがって停止も) できるのは一回きりです。</p>
+</div></blockquote>
+<p>これがそのプログラムです。 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/countdown.py">basic-twisted/countdown.py</a> にあります。このプログラムは 5 秒間のカウントダウン後に reactor を止めます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Countdown</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="n">counter</span> <span class="o">=</span> <span class="mi">5</span>
+
+    <span class="k">def</span> <span class="nf">count</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">counter</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">reactor</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span> <span class="bp">self</span><span class="o">.</span><span class="n">counter</span><span class="p">,</span> <span class="s1">&#39;...&#39;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">counter</span> <span class="o">-=</span> <span class="mi">1</span>
+            <span class="n">reactor</span><span class="o">.</span><span class="n">callLater</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">count</span><span class="p">)</span>
+
+<span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+<span class="n">reactor</span><span class="o">.</span><span class="n">callWhenRunning</span><span class="p">(</span><span class="n">Countdown</span><span class="p">()</span><span class="o">.</span><span class="n">count</span><span class="p">)</span>
+
+<span class="nb">print</span> <span class="s1">&#39;Start!&#39;</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+<span class="nb">print</span> <span class="s1">&#39;Stop!&#39;</span>
+</pre></div>
+</div>
+<p>Twisted にコールバックを登録するのに <code class="docutils literal notranslate"><span class="pre">callLater</span></code> API を使っています。 <code class="docutils literal notranslate"><span class="pre">callLater</span></code> ではコールバック関数は第二引数で、第一引数はコールバックを実行してほしいときまでの秒数です。秒数には浮動小数も使えます。</p>
+<p>では、Twisted は正確な時間にコールバックを実行するためにどのようにしているのでしょうか？プログラムはファイルディスクリプタを listen していないのに、どうして <code class="docutils literal notranslate"><span class="pre">select</span></code> ループなどのように待ち続けるのでしょう？ <code class="docutils literal notranslate"><span class="pre">select</span></code> の呼び出し、他の類似のものでもそうですが、は <cite>タイムアウト</cite> の値も受け付けます。タイムアウト値が与えられてその時間内に入出力の準備ができたファイルディスクリプタが何もない場合は、 <code class="docutils literal notranslate"><span class="pre">select</span></code> の呼び出しはとにかく処理を戻すでしょう。ついでながら、タイムアウト値にゼロを渡すことで、全くブロックすることなくファイルディスクリプタの集合を素早く確認 (もしくは「ポール」) できます。</p>
+<p>タイムアウトを、”<a class="reference internal" href="p02.html#figure5"><span class="std std-ref">図５：同期モデル</span></a>”のイベントループが待ち受けるもう一種のイベントととらえることもできます。そして、Twisted は <code class="docutils literal notranslate"><span class="pre">callLater</span></code> で登録されたあらゆる「時間指定されたコールバック」(timed callbacks) が間違いなくその時に呼び出されるように、タイムアウトを使います。もしくは、ほぼ時間通り、とも言えます。もしも他のコールバックが本当に長時間の実行になってしまうと、時間指定されたコールバックは予定された時間より遅れてしまうかもしれません。Twisted の <code class="docutils literal notranslate"><span class="pre">callLater</span></code> 機構は <a class="reference external" href="http://en.wikipedia.org/wiki/Real-time_computing#Hard_and_soft_real-time_systems">ハードリアルタイム</a> システムに要求されるような類の保証を提供できません。</p>
+<p>上記のカウントダウンプログラムの出力は次のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Start!
+5 ...
+4 ...
+3 ...
+2 ...
+1 ...
+Stop!
+</pre></div>
+</div>
+<p>最後の「Stop!」の行は reactor が処理を終了したときに表示され、 <code class="docutils literal notranslate"><span class="pre">reactor.run()</span></code> は制御を戻すことに気をつけてください。これで、自分自身で停止できるプログラムができましたね。</p>
+</div>
+<div class="section" id="id7">
+<h2>任せたよ Twisted<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>Twisted はコールバックという形で私たちのコードを呼び出して終了することがしばしばありますので、コールバックが例外を発生させたときに何が起こるかを不思議に思うかもしれません。やってみましょう。 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/basic-twisted/exception.py">basic-twisted/exception.py</a> のプログラムはあるコールバックの中で例外を発生させますが、他のコールバックは普通に動きます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">falldown</span><span class="p">():</span>
+    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;I fall down.&#39;</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">upagain</span><span class="p">():</span>
+    <span class="nb">print</span> <span class="s1">&#39;But I get up again.&#39;</span>
+    <span class="n">reactor</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+
+<span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+<span class="n">reactor</span><span class="o">.</span><span class="n">callWhenRunning</span><span class="p">(</span><span class="n">falldown</span><span class="p">)</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">callWhenRunning</span><span class="p">(</span><span class="n">upagain</span><span class="p">)</span>
+
+<span class="nb">print</span> <span class="s1">&#39;Starting the reactor.&#39;</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>コマンドラインから実行してみると、次のような感じの出力になるでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Starting</span> <span class="n">the</span> <span class="n">reactor</span><span class="o">.</span>
+<span class="n">Traceback</span> <span class="p">(</span><span class="n">most</span> <span class="n">recent</span> <span class="n">call</span> <span class="n">last</span><span class="p">):</span>
+  <span class="o">...</span> <span class="c1"># I removed most of the traceback</span>
+<span class="n">exceptions</span><span class="o">.</span><span class="n">Exception</span><span class="p">:</span> <span class="n">I</span> <span class="n">fall</span> <span class="n">down</span><span class="o">.</span>
+<span class="n">But</span> <span class="n">I</span> <span class="n">get</span> <span class="n">up</span> <span class="n">again</span><span class="o">.</span>
+</pre></div>
+</div>
+<p>最初のコールバックが発生させた例外のトレースバックが見えますが、二番目のコールバックは最初のもののあとに実行されていることに気をつけてください。 <code class="docutils literal notranslate"><span class="pre">reactor.stop()</span></code> をコメントアウトするとプログラムは永遠に実行し続けるでしょう。コールバックが失敗したとき (例外を報告するでしょうが) でさえ reactor は動き続けるのです。</p>
+<p>ネットワークサーバは一般的に非常に堅牢なソフトウェアの集まりであることが肝心です。いかなる不規則なバグが頭をもたげてこようとも、クラッシュすべきではありません。私たち自身のエラーを扱うときに嫌々ながらやるべきと言っているのではなく、Twisted が知らせてくれるということを頭に入れておけば良いのです。</p>
+</div>
+<div class="section" id="id8">
+<h2>詩をお願い<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h2>
+<p>これで Twisted を使っていくつかの詩を扱う準備が整いました。”<a class="reference internal" href="p04.html"><span class="doc">パート4: Twisted で詩を</span></a>”では、非同期に詩を取得するクライアントの Twisted 版を実装しましょう。</p>
+</div>
+<div class="section" id="id9">
+<h2>おすすめの練習問題<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">countdown.py</span></code> プログラムを、三つの独立したカウンターが異なる比率で動くようにしてみましょう。全てのカウンターが完了したら reactor を止めてください。</p></li>
+<li><p><a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/task.py">twisted.internet.task</a> の <code class="docutils literal notranslate"><span class="pre">LoopingCall</span></code> クラスを見てください。 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/task.py#L23">LoopingCall</a> を使って上記のカウントダウンプログラムを書き直してください。 <code class="docutils literal notranslate"><span class="pre">start</span></code> と <code class="docutils literal notranslate"><span class="pre">stop</span></code> メソッドを使うだけで構いませんし、「遅延された」(deferred) 戻り値を使う必要はありません。遅延された値が何であるかは、この後のパートで学習することになります。</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p02.html">パート2: ゆったりした詩と世紀末</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p04.html">パート4: Twisted で詩を</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

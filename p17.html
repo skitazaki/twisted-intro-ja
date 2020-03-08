@@ -1,0 +1,385 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート17: 「コールバック」ではない方法 &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート18: Deferreds En Masse" href="p18.html" />
+    <link rel="prev" title="パート16: Twisted をデーモン化する" href="p16.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート17: 「コールバック」ではない方法</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p16.html">パート16: Twisted をデーモン化する</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p18.html">パート18: Deferreds En Masse</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="id1">
+<h1>パート17: 「コールバック」ではない方法<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id2">
+<h2>はじめに<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>このパートではコールバックに主眼を置き直します。
+Twisted で <a class="reference external" href="http://docs.python.org/tutorial/classes.html#generators">generators</a> を使ってコールバックを記述するもうひとつのテクニックを紹介しましょう。
+このやり方がどうやって動くのかを示し、純粋な <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> を使う場合と照らし合わせてみます。
+最後に、このテクニックを使って詩のクライアントのひとつを書き直しましょう。
+とはいえ、なんでこの手法がコールバックを生成するのにふさわしいかを理解するために、まずはジェネレータの動作を復習しておきましょうか。</p>
+<div class="section" id="id3">
+<h3>ジェネレータに関する簡単な復習<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<p>ご存知のように、Python のジェネレータは関数内で <code class="docutils literal notranslate"><span class="pre">yield</span></code> を使って生成できる “restartable function” (TODO: 公式ドキュメントの和訳を見ておく) です。
+こうすることで、ある関数は、一連のステップ内で実行するために利用できる <a class="reference external" href="http://docs.python.org/tutorial/classes.html#iterators">iterator</a>
+(イテレータ) を返す、ジェネレータ関数になります。
+イテレータのそれぞれのサイクルは関数を再始動させ、次の <code class="docutils literal notranslate"><span class="pre">yield</span></code> に達するまで処理を続けます。</p>
+<p>ジェネレータ (と、イテレータ) はしばしば lazily-created sequences of values (TODO: 日本語を調べる/考える) を表現するために使われます。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/gen-1.py#L1">inline-callbacks/gen-1.py</a> にあるサンプルコードを見てみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">my_generator</span><span class="p">():</span>
+    <span class="nb">print</span> <span class="s1">&#39;starting up&#39;</span>
+    <span class="k">yield</span> <span class="mi">1</span>
+    <span class="nb">print</span> <span class="s2">&quot;workin&#39;&quot;</span>
+    <span class="k">yield</span> <span class="mi">2</span>
+    <span class="nb">print</span> <span class="s2">&quot;still workin&#39;&quot;</span>
+    <span class="k">yield</span> <span class="mi">3</span>
+    <span class="nb">print</span> <span class="s1">&#39;done&#39;</span>
+
+<span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">my_generator</span><span class="p">():</span>
+    <span class="nb">print</span> <span class="n">n</span>
+</pre></div>
+</div>
+<p>ここでは、ジェネレータに 1, 2, 3 というシーケンスを生成させています。
+コードを実行させてみると、ジェネレータの <code class="docutils literal notranslate"><span class="pre">print</span></code> 文が <code class="docutils literal notranslate"><span class="pre">for</span></code> ループ内の <code class="docutils literal notranslate"><span class="pre">print</span></code> 文にそれぞれのループで織り交ぜられていることが分かるでしょう。</p>
+<p>ジェネレータ自身を生成することで、このコードをもっと明示的にすることもできます。
+(<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/gen-2.py#L1">inline-callbacks/gen-2.py</a>):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">my_generator</span><span class="p">():</span>
+    <span class="nb">print</span> <span class="s1">&#39;starting up&#39;</span>
+    <span class="k">yield</span> <span class="mi">1</span>
+    <span class="nb">print</span> <span class="s2">&quot;workin&#39;&quot;</span>
+    <span class="k">yield</span> <span class="mi">2</span>
+    <span class="nb">print</span> <span class="s2">&quot;still workin&#39;&quot;</span>
+    <span class="k">yield</span> <span class="mi">3</span>
+    <span class="nb">print</span> <span class="s1">&#39;done&#39;</span>
+
+<span class="n">gen</span> <span class="o">=</span> <span class="n">my_generator</span><span class="p">()</span>
+
+<span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="n">gen</span><span class="o">.</span><span class="n">next</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+        <span class="k">break</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span> <span class="n">n</span>
+</pre></div>
+</div>
+<p>シーケンスとして考えてみると、ジェネレータは後続の値を取得するためのオブジェクトにすぎません。
+しかし、ジェネレータ自身の観点から考えてみることもできます。</p>
+<ol class="arabic simple">
+<li><p>ジェネレータ関数はループによって呼び出されるまで動き出しません (<code class="docutils literal notranslate"><span class="pre">next</span></code> メソッドを使います)。</p></li>
+<li><p>ジェネレータ関数が動き出すと、ループに処理を返すまで動き続けます (<code class="docutils literal notranslate"><span class="pre">yield</span></code> を使います)。</p></li>
+<li><p>ループが他のコード (<code class="docutils literal notranslate"><span class="pre">print</span></code> 文のように) を実行しているときは、ジェネレータは動作していません。</p></li>
+<li><p>ジェネレータが動作しているときは、ループは動作していません (ジェネレータを待つためにブロックされています)。</p></li>
+<li><p>ジェネレータがループに制御を委譲 (<code class="docutils literal notranslate"><span class="pre">yield</span></code>) すると、ジェネレータが再度実行されるまで、任意の時間が渡されます (さらに任意の量のコードが実行されるかもしれません)。</p></li>
+</ol>
+<p>非同期システムにおけるコールバックの動作とそっくりですね。
+<code class="docutils literal notranslate"><span class="pre">while</span></code> ループを reactor、ジェネレータを <code class="docutils literal notranslate"><span class="pre">yield</span></code> 文で分割された一連のコールバックとみなせます。
+すべてのコールバックは同じローカル変数の名前空間を共有し、その名前空間はあるコールバックから次のコールバックに引き継がれる点も見逃せません。
+さらに、一度に複数のジェネレータを有効にでき (<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/gen-3.py#L1">inline-callbacks/gen-3.py</a>
+の例をみてください)、それぞれのコールバックはお互いに混ぜこぜになります。
+ちょうど、Twisted のようなシステムで独立した非同期タスクを持てるようにです。</p>
+<p>それでもいくつか見逃していることもあります。
+コールバックは reactor から呼ばれるだけではありませんし、情報を受け取ることもできます。
+遅延オブジェクトのチェーンの一部であるとき、コールバックは Python の単一の値として結果を受け取るか、 <code class="docutils literal notranslate"><span class="pre">Failure</span></code> としてエラーを受け取ります。</p>
+<p>Python 2.5 からは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/gen-4.py#L1">inline-callbacks/gen-4.py</a> で示すように、
+ジェネレータを再始動させるときに情報を送信できるような方法に拡張されました。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Malfunction</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+<span class="k">def</span> <span class="nf">my_generator</span><span class="p">():</span>
+    <span class="nb">print</span> <span class="s1">&#39;starting up&#39;</span>
+
+    <span class="n">val</span> <span class="o">=</span> <span class="k">yield</span> <span class="mi">1</span>
+    <span class="nb">print</span> <span class="s1">&#39;got:&#39;</span><span class="p">,</span> <span class="n">val</span>
+
+    <span class="n">val</span> <span class="o">=</span> <span class="k">yield</span> <span class="mi">2</span>
+    <span class="nb">print</span> <span class="s1">&#39;got:&#39;</span><span class="p">,</span> <span class="n">val</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span> <span class="mi">3</span>
+    <span class="k">except</span> <span class="n">Malfunction</span><span class="p">:</span>
+        <span class="nb">print</span> <span class="s1">&#39;malfunction!&#39;</span>
+
+    <span class="k">yield</span> <span class="mi">4</span>
+
+    <span class="nb">print</span> <span class="s1">&#39;done&#39;</span>
+
+<span class="n">gen</span> <span class="o">=</span> <span class="n">my_generator</span><span class="p">()</span>
+
+<span class="nb">print</span> <span class="n">gen</span><span class="o">.</span><span class="n">next</span><span class="p">()</span> <span class="c1"># start the generator</span>
+<span class="nb">print</span> <span class="n">gen</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span> <span class="c1"># send the value 10</span>
+<span class="nb">print</span> <span class="n">gen</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span> <span class="c1"># send the value 20</span>
+<span class="nb">print</span> <span class="n">gen</span><span class="o">.</span><span class="n">throw</span><span class="p">(</span><span class="n">Malfunction</span><span class="p">())</span> <span class="c1"># raise an exception inside the generator</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">gen</span><span class="o">.</span><span class="n">next</span><span class="p">()</span>
+<span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+    <span class="k">pass</span>
+</pre></div>
+</div>
+<p>Python 2.5 かそれ以降のバージョンでは、 <code class="docutils literal notranslate"><span class="pre">yield</span></code> 文は値の評価式です。
+そして、ジェネレータを再始動させるコードは <code class="docutils literal notranslate"><span class="pre">next</span></code> ではなく <code class="docutils literal notranslate"><span class="pre">send</span></code> メソッドを使うという決定もできます (<code class="docutils literal notranslate"><span class="pre">next</span></code> を使うと、その値は <code class="docutils literal notranslate"><span class="pre">None</span></code> です)。
+さらに、 <code class="docutils literal notranslate"><span class="pre">throw</span></code> メソッドを使って、ジェネレータの「内側」から任意の例外を投げることができます。
+なんて素晴らしいんでしょう！</p>
+</div>
+</div>
+<div class="section" id="id4">
+<h2>インラインコールバック<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>ジェネレータに値と例外を <code class="docutils literal notranslate"><span class="pre">send</span></code> することと <code class="docutils literal notranslate"><span class="pre">throw</span></code> することについて復習したことが分かると、ジェネレータを一連のコールバックとして想定できます。
+遅延オブジェクトに含まれるものかのように、それは結果か失敗のどちらかを受け取ります。
+コールバックは <code class="docutils literal notranslate"><span class="pre">yield</span></code> によって分割され、それぞれの <code class="docutils literal notranslate"><span class="pre">yield</span></code> の評価値は次のコールバックへの結果となります (もしくは <code class="docutils literal notranslate"><span class="pre">yield</span></code> が例外を投げると “failure” になります)。
+図35はその対応を示します。</p>
+<div class="figure align-default" id="id10">
+<span id="figure35"></span><img alt="_images/p17_generator-callbacks1.png" src="_images/p17_generator-callbacks1.png" />
+<p class="caption"><span class="caption-text">図35：コールバックシーケンスとしてのジェネレータ</span><a class="headerlink" href="#id10" title="Permalink to this image">¶</a></p>
+</div>
+<p>一連のコールバックが遅延オブジェクト内でチェーンとしてまとめられると、それぞれのコールバックは結果をひとつ前から受け取ります。
+ジェネレータを使ってやってみるのは簡単そうですね。ジェネレータの前回の実行分から受け取った値を <code class="docutils literal notranslate"><span class="pre">send</span></code> し (<code class="docutils literal notranslate"><span class="pre">yield</span></code> した値ですね)、
+それを使って次回は再始動させるだけです。
+しかし、ちょっと馬鹿馬鹿しくも思えます。
+ジェネレータは開始時にその値を計算するのに、なんで送り返すなんてことをするのでしょう？
+次回に必要ならばジェネレータは値を変数に保存しておくこともできるでしょう。
+何が重要なのでしょうか？</p>
+<p>“<a class="reference internal" href="p13.html"><span class="doc">パート13: Deferred と行こう</span></a>”で学んだことを思い出してください。遅延オブジェクト内のコールバックは遅延オブジェクト自身を返すことができましたよね。
+この場合、外側の遅延オブジェクトは内側の遅延オブジェクトが開始するまで止まっていますので、外側の遅延オブジェクトのチェーンでの次のコールバック (もしくはエラー用コールバック) は、内側の遅延オブジェクトからの結果 (もしくは失敗) を引数として呼び出されます。</p>
+<p>それでは、ジェネレータが通常の Python の値ではなく遅延オブジェクトを <code class="docutils literal notranslate"><span class="pre">yield</span></code> した場合を想像してみてください。
+ジェネレータは停止 (“paused”) され、自動化されます。
+ジェネレータはいつも、すべての <code class="docutils literal notranslate"><span class="pre">yield</span></code> 文の後で明示的に再始動されるまで停止します。
+ですから、遅延オブジェクトが発火するまで、ジェネレータの再始動を遅らせることが可能です。
+このとき私たちは値を <code class="docutils literal notranslate"><span class="pre">send</span></code> する (遅延オブジェクトが成功したら) か、例外を <code class="docutils literal notranslate"><span class="pre">throw</span></code> する (遅延オブジェクトが失敗したら) かのどちらかです。
+これによってジェネレータを純粋な非同期コールバックのシーケンスにしていますし、そしてこれこそが <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py">twisted.internet.defer</a> 内の <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#973">inlineCallbacks</a> 関数の背後にある考え方なのです。</p>
+<div class="section" id="inlinecalbacks">
+<h3>inlineCalbacks<a class="headerlink" href="#inlinecalbacks" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/inline-callbacks-1.py#L1">inline-callbacks/inline-callbacks-1.py</a> にあるプログラム例について考えてみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet.defer</span> <span class="kn">import</span> <span class="n">inlineCallbacks</span><span class="p">,</span> <span class="n">Deferred</span>
+
+<span class="nd">@inlineCallbacks</span>
+<span class="k">def</span> <span class="nf">my_callbacks</span><span class="p">():</span>
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+    <span class="nb">print</span> <span class="s1">&#39;first callback&#39;</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="k">yield</span> <span class="mi">1</span> <span class="c1"># yielded values that aren&#39;t deferred come right back</span>
+
+    <span class="nb">print</span> <span class="s1">&#39;second callback got&#39;</span><span class="p">,</span> <span class="n">result</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">Deferred</span><span class="p">()</span>
+    <span class="n">reactor</span><span class="o">.</span><span class="n">callLater</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">d</span><span class="o">.</span><span class="n">callback</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="k">yield</span> <span class="n">d</span> <span class="c1"># yielded deferreds will pause the generator</span>
+
+    <span class="nb">print</span> <span class="s1">&#39;third callback got&#39;</span><span class="p">,</span> <span class="n">result</span> <span class="c1"># the result of the deferred</span>
+
+    <span class="n">d</span> <span class="o">=</span> <span class="n">Deferred</span><span class="p">()</span>
+    <span class="n">reactor</span><span class="o">.</span><span class="n">callLater</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">d</span><span class="o">.</span><span class="n">errback</span><span class="p">,</span> <span class="ne">Exception</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span> <span class="n">d</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">,</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">e</span>
+
+    <span class="nb">print</span> <span class="s1">&#39;fourth callback got&#39;</span><span class="p">,</span> <span class="nb">repr</span><span class="p">(</span><span class="n">result</span><span class="p">)</span> <span class="c1"># the exception from the deferred</span>
+
+    <span class="n">reactor</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+
+<span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">callWhenRunning</span><span class="p">(</span><span class="n">my_callbacks</span><span class="p">)</span>
+<span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>この例を実行してみると、ジェネレータが最後まで実行され、reactor を停止させることが分かりますね。
+この例は <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> 関数のいくつかの側面を表しています。
+ひとつめに、 <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> はデコレータであり、つねにジェネレータ関数、つまり <code class="docutils literal notranslate"><span class="pre">yield</span></code> を使う関数をデコレートします。
+<code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> 全体の目的は、上述したスキームに沿って、ジェネレータを一連の非同期なコールバックにしてしまうことです。</p>
+<p>ふたつめに、 <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> でデコレートされた関数を呼び出すと、 <code class="docutils literal notranslate"><span class="pre">next</span></code> か <code class="docutils literal notranslate"><span class="pre">send</span></code> あるいは <code class="docutils literal notranslate"><span class="pre">throw</span></code> 自身を呼び出す必要がありません。
+細かいことはデコレータが面倒をみてくれますので、ジェネレータが最後まで実行されることを保証してくれます (例外を投げないと仮定してください)。</p>
+<p>みっつめとして、ジェネレータから遅延オブジェクトではない値を <code class="docutils literal notranslate"><span class="pre">yield</span></code> すると、 <code class="docutils literal notranslate"><span class="pre">yield</span></code> の結果としてそれと同じ値を伴って即座に再始動されます。</p>
+<p>そして最後に、ジェネレータから遅延オブジェクトを <code class="docutils literal notranslate"><span class="pre">yield</span></code> すると、それが発火されるまで再始動されません。
+遅延オブジェクトが発火すると、 <code class="docutils literal notranslate"><span class="pre">yield</span></code> の結果は遅延オブジェクトからの値に過ぎません。
+失敗した場合は <code class="docutils literal notranslate"><span class="pre">yield</span></code> 文が例外を投げます。
+ここでの例外は <code class="docutils literal notranslate"><span class="pre">Failure</span></code> ではなく普通の <code class="docutils literal notranslate"><span class="pre">Exception</span></code> であることに注意してください。
+<code class="docutils literal notranslate"><span class="pre">yield</span></code> 文を <code class="docutils literal notranslate"><span class="pre">try/except</span></code> 節で囲むことで例外を捕まえることができます。</p>
+<p>この例では、短い時間の後で遅延オブジェクトを発火させるために <code class="docutils literal notranslate"><span class="pre">callLater</span></code> を使っているに過ぎません。
+コールバックチェーンの中にノンブロッキングな遅延を詰めるにはお手軽な方法ですが、通常は、ジェネレータから呼び出される他の非同期操作 (つまり <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code>) が返す遅延オブジェクトを <code class="docutils literal notranslate"><span class="pre">yield</span></code> させるでしょうね。</p>
+<p>ここまでで <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> でデコレートされた関数がどのように動き出すか分かりましたが、実際にそれを呼び出して得られる戻り値は何でしょうか？
+お考えのように、遅延オブジェクトです。
+いつジェネレータが停止するのか正確には分かりませんので (複数個の遅延オブジェクトを <code class="docutils literal notranslate"><span class="pre">yield</span></code> するかもしれません)、デコレートされた関数自身は非同期であり、遅延オブジェクトが適切な戻り値なのです。
+戻り値である遅延オブジェクトは、ジェネレータが <code class="docutils literal notranslate"><span class="pre">yield</span></code> するかもしれない遅延オブジェクトのひとつではないことに注意してください。
+むしろ、ジェネレータが完全に動作を完了した後でのみ発火する (もしくは例外を投げる) 遅延オブジェクトです。</p>
+<p>ジェネレータが例外を投げると、戻り値である遅延オブジェクトは <code class="docutils literal notranslate"><span class="pre">Failure</span></code> でラップされた例外を引数としてエラー用のコールバックチェーンを発火させます。
+しかし、ジェネレータに通常の値を返してもらいたかったら、 <code class="docutils literal notranslate"><span class="pre">defer.returnValue</span></code> 関数を使って “return” させなくてはなりません。
+通常の <code class="docutils literal notranslate"><span class="pre">return</span></code> 文のように、ジェネレータを停止させるでしょう (実際は特別な例外を投げます)。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/inline-callbacks-2.py#L1">inline-callbacks/inline-callbacks-2.py</a> の例は両方の可能性を表現しています。</p>
+</div>
+</div>
+<div class="section" id="id5">
+<h2>クライアント 7.0<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>新しいバージョンの詩のクライアントで動作するように <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> を配置してみましょう。
+コードは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L1">twisted-client-7/get-poetry.py</a> にあります。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-6/get-poetry.py#L151">twisted-client-6/get-poetry.py</a> のクライアント 6.0 と比較したくなるでしょう。
+関連のある変更点は <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L151">poetry_main</a> にあります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">poetry_main</span><span class="p">():</span>
+    <span class="n">addresses</span> <span class="o">=</span> <span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="n">xform_addr</span> <span class="o">=</span> <span class="n">addresses</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="n">proxy</span> <span class="o">=</span> <span class="n">TransformProxy</span><span class="p">(</span><span class="o">*</span><span class="n">xform_addr</span><span class="p">)</span>
+
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="nd">@defer</span><span class="o">.</span><span class="n">inlineCallbacks</span>
+    <span class="k">def</span> <span class="nf">get_transformed_poem</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">poem</span> <span class="o">=</span> <span class="k">yield</span> <span class="n">get_poetry</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">,</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span> <span class="o">&gt;&gt;</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="s1">&#39;The poem download failed:&#39;</span><span class="p">,</span> <span class="n">e</span>
+            <span class="k">raise</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">poem</span> <span class="o">=</span> <span class="k">yield</span> <span class="n">proxy</span><span class="o">.</span><span class="n">xform</span><span class="p">(</span><span class="s1">&#39;cummingsify&#39;</span><span class="p">,</span> <span class="n">poem</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="nb">print</span> <span class="o">&gt;&gt;</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="s1">&#39;Cummingsify failed!&#39;</span>
+
+        <span class="n">defer</span><span class="o">.</span><span class="n">returnValue</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">got_poem</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+        <span class="nb">print</span> <span class="n">poem</span>
+
+    <span class="k">def</span> <span class="nf">poem_done</span><span class="p">(</span><span class="n">_</span><span class="p">):</span>
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">addresses</span><span class="p">):</span>
+            <span class="n">reactor</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="n">address</span> <span class="ow">in</span> <span class="n">addresses</span><span class="p">:</span>
+        <span class="n">host</span><span class="p">,</span> <span class="n">port</span> <span class="o">=</span> <span class="n">address</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">get_transformed_poem</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">got_poem</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addBoth</span><span class="p">(</span><span class="n">poem_done</span><span class="p">)</span>
+
+    <span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>新しいバージョンでは、 <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> ジェネレータ関数である <code class="docutils literal notranslate"><span class="pre">get_transformed_poem</span></code> は、詩を取得することと、その後に変換を適用することの両方に責任を持ちます (変換サービス経由で)。
+どちらの操作も非同期ですから、それぞれの時点で遅延オブジェクトを渡し、(暗黙的に) その結果を待ちます。
+クライアント 6.0 では、変換に失敗すると元の詩を返すだけです。
+ジェネレータ内では非同期なエラーを処理するために <code class="docutils literal notranslate"><span class="pre">try</span></code>/<code class="docutils literal notranslate"><span class="pre">except</span></code> 節を使えることを確認しましょう。</p>
+<p>新しいクライアントも以前と同じ方法でテストできます。
+まずは変換サーバを起動させましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">tranformedpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10001</span>
+</pre></div>
+</div>
+<p>続いて二つの詩のサーバを起動させます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">fastpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10002</span> <span class="n">poetry</span><span class="o">/</span><span class="n">fascination</span><span class="o">.</span><span class="n">txt</span>
+<span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">fastpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10003</span> <span class="n">poetry</span><span class="o">/</span><span class="n">science</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>それでは新しいクライアントを実行させましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">client</span><span class="o">-</span><span class="mi">7</span><span class="o">/</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">.</span><span class="n">py</span> <span class="mi">10001</span> <span class="mi">10002</span> <span class="mi">10003</span>
+</pre></div>
+</div>
+<p>クライアントがエラーをどのように処理するかを確認するために、ひとつかそれ以上のサーバを停止させてみてください。</p>
+</div>
+<div class="section" id="id6">
+<h2>議論<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">Deferred</span></code> オブジェクトのように、 <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> 関数は非同期コールバックを構成する新しい方法を提示してくれます。
+そして遅延オブジェクトがあるときと同じように、 <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> はゲームのルールを変えません。
+特に、コールバックは一度にひとつしか動作しませんし、reactor から呼び出されます。
+これまでと同じようにインラインコールバックからのトレースバックを出力することで、このことを確認できます。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/inline-callbacks/inline-callbacks-tb.py#L1">inline-callbacks/inline-callbacks-tb.py</a> のサンプルスクリプトにある通りです。
+このコードを実行させてみると、トレースバックのトップに  <code class="docutils literal notranslate"><span class="pre">reactor.run()</span></code> があり、途中にたくさんのヘルパー関数、それから一番下に私たちのコールバックがあります。</p>
+<p>図29を適応させることができます。
+これは、 <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> ジェネレータが遅延オブジェクトを <code class="docutils literal notranslate"><span class="pre">yield</span></code> するとき何が起こるかを見せることにより、遅延オブジェクト内で、あるコールバックがもうひとつの遅延オブジェクトを返すときに起こることを説明してくれます。
+図36を見てください。</p>
+<div class="figure align-default" id="id11">
+<span id="figure36"></span><img alt="_images/p17_inline-callbacks1.png" src="_images/p17_inline-callbacks1.png" />
+<p class="caption"><span class="caption-text">図36：inlineCallbacks 関数における制御の流れ</span><a class="headerlink" href="#id11" title="Permalink to this image">¶</a></p>
+</div>
+<p>描かれている考え方は一緒ですので、両方の場合で同じ図が活躍してくれていますね。— ある非同期操作がもう一つを待つことになります。
+<code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> と遅延オブジェクトはこれと同じ問題の多くを解決するのに、どちらか片方を選ぶのは何故でしょう？
+<code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> の潜在的な利点はいくつかあります。</p>
+<ul class="simple">
+<li><p>コールバックは名前空間を共有しますので、追加の状態を渡す必要がありません。</p></li>
+<li><p>コールバックの順番を簡単に確認できます。上から下に実行するだけです。</p></li>
+<li><p>個別のコールバックの関数宣言と暗黙的な呼び出し制御がありませんので、タイピング量は概して少なくて済みます。</p></li>
+<li><p>エラーは親しみのある <code class="docutils literal notranslate"><span class="pre">try</span></code>/<code class="docutils literal notranslate"><span class="pre">except</span></code> 節で処理されます。</p></li>
+</ul>
+<p>落とし穴も潜んでいます。</p>
+<ul class="simple">
+<li><p>ジェネレータの中のコールバックを個別に呼び出すことはできません。このことは、コードの再利用を難しくしてしまいます。
+遅延オブジェクトを使うと、遅延オブジェクトを構築するコードは任意のコールバックを任意の順番で追加できます。</p></li>
+<li><p>ジェネレータのコンパクトな形式は非同期コールバックも含まれているという事実をぼんやりさせてしまいます。
+通常の連続的な関数の出現と見た目は似ていますが、ジェネレータは全く異なる振る舞いをみせます。
+<code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> 関数は非同期なプログラミングモデルの学習を回避するための方法ではありません。</p></li>
+</ul>
+<p>すべてのテクニックを持ってすれば、選択に必要な経験はこれまでの慣習が提供してくれるでしょう。</p>
+</div>
+<div class="section" id="id7">
+<h2>まとめ<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>このパートでは、 <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> デコレータに関することと、Python ジェネレータの形式で非同期なコールバックのシーケンスを表現する方法ついて学びました。</p>
+<p>“<a class="reference internal" href="p18.html"><span class="doc">パート18: Deferreds En Masse</span></a>” では、 並行 (“parallel”) な非同期操作の集合を管理する方法を学んでいきましょう。</p>
+<div class="section" id="id8">
+<h3>おすすめの練習問題<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h3>
+<ol class="arabic simple">
+<li><p>なぜ <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> 関数は複数形なのでしょうか？</p></li>
+<li><p><a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#973">inlineCallbacks</a> とそのヘルパー関数である <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#L874">_inlineCallbacks</a> の実装を学習してください。
+“<a class="reference external" href="http://en.wikipedia.org/wiki/The_Devil_is_in_the_details">the devil is in the details</a>” というフレーズを考えてみましょう。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">N</span></code> 個の <code class="docutils literal notranslate"><span class="pre">yield</span></code> 文を持つジェネレータにはいくつのコールバックが含まれるでしょうか？ ループや <code class="docutils literal notranslate"><span class="pre">if</span></code> 文は存在しないと仮定してください。</p></li>
+<li><p>詩のクライアント 7.0 は一度にみっつのジェネレータを実行することがあります。
+概念的には、お互いに混ざり合う組み合わせはいくつあるでしょう？
+詩のクライアントでの呼び出され方と <code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> の実装を考えてみると、実際に可能な組み合わせはいくつでしょう？</p></li>
+<li><p>クライアント 7.0 にある <code class="docutils literal notranslate"><span class="pre">got_poem</span></code> コールバックをジェネレータ内に移動させてください。</p></li>
+<li><p>同様に <code class="docutils literal notranslate"><span class="pre">poem_done</span></code> コールバックをジェネレータ内に移動させてください。
+注意！何があっても reactor が終了できるように、全ての失敗する場合を処理してください。
+reactor を停止させるために、どのようにして出来上がったコードを遅延オブジェクトを使ったものと比べましょうか？</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">while</span></code> ループ内の <code class="docutils literal notranslate"><span class="pre">yield</span></code> 文を含むジェネレータは、概念的に無限数列を表現できます。
+<code class="docutils literal notranslate"><span class="pre">inlineCallbacks</span></code> でデコレートされたそのようなジェネレータは何を表すのでしょうか？</p></li>
+</ol>
+</div>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p16.html">パート16: Twisted をデーモン化する</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p18.html">パート18: Deferreds En Masse</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

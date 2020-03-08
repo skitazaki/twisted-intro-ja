@@ -1,0 +1,221 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート2: ゆったりした詩と世紀末 &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート3: 目を向けてみましょう" href="p03.html" />
+    <link rel="prev" title="パート1: さあ、はじめましょう" href="p01.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート2: ゆったりした詩と世紀末</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p01.html">パート1: さあ、はじめましょう</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p03.html">パート3: 目を向けてみましょう</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="id1">
+<h1>パート2: ゆったりした詩と世紀末<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<p>このパートでは”<a class="reference internal" href="p01.html"><span class="doc">パート1: さあ、はじめましょう</span></a>”で始めた入門の続きを進めていきます。もし読んでいるなら、ようこそ戻ってきてくれましたね。いよいよ自分の手を動かしてコードを書いていきましょう。でもまずはちょっと脱線して、想定していることを共有しておきましょう。</p>
+<div class="section" id="id2">
+<h2>想定している読者<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>Python で同期プログラムを書く基礎知識を身につけていて、Python のソケットプログラミングについて少しは知っているものと考えています。もしソケットを使ったことがなければ、とりあえず <a class="reference external" href="http://docs.python.org/library/socket.html#module-socket">ソケットモジュールのドキュメント</a> 、特に最後の方のコード例、に目を通しておくと良いでしょう。Python を使ったことがないと、これ以降はボヤッとしたものになってしまうでしょう。</p>
+</div>
+<div class="section" id="id4">
+<h2>想定している読者のコンピュータ<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>私が Twisted を使ってきたのは主として Linux 上であり、コード例も Linux で作りました。意図的に Linux べったりのコードにしているつもりはありませんが、Linux や Unix のような (Mac OSX や FreeBSD など) システムでしか動作しないものがあるかもしれません。Windows はちょっと変わってますので、あなたが Windows 上で作業していても気持ち以外は助けになれません。</p>
+<p>マシンには比較的最近の <a class="reference external" href="http://python.org/download">Python</a> と <a class="reference external" href="http://twistedmatrix.com/trac/wiki/Downloads">Twisted</a> をインストールしてあるものとします。例で示すコードは Python 2.5 と Twisted 8.2.0 で開発しました。</p>
+<p>すべての例はネットワーク越しで設定できますが、単一のマシンで動作させられます。非同期プログラミングの基本的な仕組みを学習するためには単一のコンピュータが良いでしょう。</p>
+</div>
+<div class="section" id="id5">
+<h2>コード例の入手<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>コード例は <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/zipball/master">zip</a> か <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/tarball/master">tar</a> か、あるいは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/tree/master">私の公開 git レポジトリ</a> を <a class="reference external" href="git://github.com/jdavisp3/twisted-intro.git">clone する</a> ことで入手できます。 <a class="reference external" href="http://git-scm.com/">git</a> か git レポジトリを読めるような版管理システムを使っているのなら、こちらの方法をお勧めします。将来的にはコード例を更新していきますし、あなたも最新の状態を保ちやすくなりますからね。おまけに図を作成するために使った SVG ファイルもあります。次の git コマンドでレポジトリを clone してください。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">git</span> <span class="n">clone</span> <span class="n">git</span><span class="p">:</span><span class="o">//</span><span class="n">github</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">jdavisp3</span><span class="o">/</span><span class="n">twisted</span><span class="o">-</span><span class="n">intro</span><span class="o">.</span><span class="n">git</span>
+</pre></div>
+</div>
+<p>以降では、最新のコード例があり、最上位ディレクトリを開いたシェルが複数あるものとします。(その内のひとつは README を開いておいてください)</p>
+</div>
+<div class="section" id="id7">
+<h2>のんびりした詩<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>CPU はネットワークよりはるかに高速ですが、それでも、ほとんどのネットワークはあなたの頭がものごとを考えるよりはかなり高速ですし、少なくとも眼で追えるよりは高速です。このため、「CPU から見た」ネットワークの遅延を確認することは難しい問題になりえます。マシンが一台しかなく、バイト列が <a class="reference external" href="http://en.wikipedia.org/wiki/Loopback">ループバックインターフェイス</a> を最高速で駆け抜けていくような場合は特にそうです。人間が判別できるような人為的な遅延を持った、遅いサーバが必要です。サーバは何らかのことを提供しなくてはいけませんから、詩を提供することにしましょう。コード例には「 <code class="docutils literal notranslate"><span class="pre">poetry</span></code> 」というサブディレクトリがあります。 <a class="reference external" href="http://en.wikipedia.org/wiki/Donne">John Donne</a> 、 <a class="reference external" href="http://en.wikipedia.org/wiki/Yeats">W.B. Yeats</a> 、 <a class="reference external" href="http://en.wikipedia.org/wiki/Poe">Edgar Allen Poe</a> のそれぞれの詩をひとつずつ含んでいます。もちろんあなた好みの詩に入れ替えてもらって構いませんよ。</p>
+<p>基本的なのんびりした詩のサーバは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/blocking-server/slowpoetry.py">blocking-server/slowpoetry.py</a> で実装しています。次のようにしてインスタンスを起動できます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="n">poetry</span><span class="o">/</span><span class="n">ecstasy</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>このコマンドは John Donne の詩である「Ecstasy」を送り出すブロッキングサーバを開始します。ちょっとブロッキングサーバのソースコードをのぞいてみましょう。見れば分かるように、Twisted を使っておらず、基本的な Python のソケット操作だけです。一度にある程度のバイト数しか送り出さず、それらの間隔には同じだけの遅延があります。デフォルトでは 0.1 秒ごとに 10 バイトを送り出しますが、コマンドラインの <code class="docutils literal notranslate"><span class="pre">--num-bytes</span></code> と <code class="docutils literal notranslate"><span class="pre">--delay</span></code> オプションでパラメータを変更できます。たとえば、5 秒ごとに 50 バイトを送るためには次のようにします。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">num</span><span class="o">-</span><span class="nb">bytes</span> <span class="mi">50</span> <span class="o">--</span><span class="n">delay</span> <span class="mi">5</span> <span class="n">poetry</span><span class="o">/</span><span class="n">ecstasy</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>サーバは、起動するときに待ち受けポート番号を出力します。デフォルトではマシンで利用可能なランダムなポートを使います。設定を変えて起動する場合、クライアントのコマンドを調整する必要がないように同じポート番号を使いたくなるでしょう。次のようにすると特定のポート番号を指定できます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10000</span> <span class="n">poetry</span><span class="o">/</span><span class="n">ecstasy</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p><a class="reference external" href="http://netcat.sourceforge.net/">netcat</a> <a class="footnote-reference brackets" href="#id10" id="id9">*</a> プログラムを使える場合は次のようにテストできます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">netcat</span> <span class="n">localhost</span> <span class="mi">10000</span>
+</pre></div>
+</div>
+<dl class="footnote brackets">
+<dt class="label" id="id10"><span class="brackets"><a class="fn-backref" href="#id9">*</a></span></dt>
+<dd><p>訳注: コマンド名が <code class="docutils literal notranslate"><span class="pre">netcat</span></code> ではなく <code class="docutils literal notranslate"><span class="pre">nc</span></code> の処理系もあるかもしれません。</p>
+</dd>
+</dl>
+<p>サーバが動作していれば、詩が画面にゆっくりと流れてくるでしょう。スゴイ！(訳注：Ecstasy! と掛けてるから英語だとおもしろい、というジョーク) また、サーバがバイトを送出するごとに一行ずつ出力していることに気付くでしょう。完全に詩を送りきってしまうと、サーバは接続を切断します。</p>
+<p>デフォルトでは、サーバは自分のマシンの「ループバック」インターフェイスを listen しているだけです。もし別のマシンからサーバに接続したい場合は、 <code class="docutils literal notranslate"><span class="pre">--iface</span></code> オプションで listen するインターフェイスを指定できます。</p>
+<p>サーバがそれぞれの詩をゆっくりと送り出すだけでなく、ソースコードを読むと、サーバがあるクライアントに詩を送っている間は他の全てのクライアントはそのクライアントに詩を送りきるまで待たなくてはならないことがお分かりでしょうか。本当にのんびりとしたサーバですので、学習用以外には特に役立たないでしょう。</p>
+<blockquote>
+<div><p><strong>ホントでしょうか？</strong>
+他方で、 <a class="reference external" href="http://www.peakoil.net/">Peak Oil</a> のもっと悲観的な人たちが正しく、実世界は世界的なエネルギー危機と地球温暖化に向かっているとすれば、
+遠からぬ未来にはたぶん、帯域を食わず低電力の poetry server が私たちに必要なものになるかもしれません。
+想像してみてください。長らく、自分が満足するような庭の手入れに精を出し、自分自身の洋服をつくり、地域の自治会に奉仕し、
+世紀末後の荒廃した状態を転々とする非常にデリケートな無気力人間 (訳注：zombie。ウィルスに感染したコンピュータのことかもしれないし、得体の知れないものかも) を撃退しながら過ごしてきた後に、
+あなたの発生器 (訳注：詩を送り出すサーバのこと) を開始して、消失してしまった文明から高度な文化の数行をダウンロードできるかもしれません。このときこそが私たちのちっぽけなサーバがその意義を発揮するときなのです。</p>
+</div></blockquote>
+</div>
+<div class="section" id="id11">
+<h2>ブロッキングクライアント<a class="headerlink" href="#id11" title="Permalink to this headline">¶</a></h2>
+<p>コード例には複数のサーバから次々に詩を取得できるブロッキングクライアントもあります。パート１の”<a class="reference internal" href="p01.html#figure1"><span class="std std-ref">図１：同期モデル</span></a>”で示したように、クライアントに三つのタスクを実行させてみましょう。まずは三つのサーバを実行させ、別々の詩を送り出させます。三つの別々のターミナルウィンドウでこれらのコマンドを実行してください。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10000</span> <span class="n">poetry</span><span class="o">/</span><span class="n">ecstasy</span><span class="o">.</span><span class="n">txt</span> <span class="o">--</span><span class="n">num</span><span class="o">-</span><span class="nb">bytes</span> <span class="mi">30</span>
+<span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10001</span> <span class="n">poetry</span><span class="o">/</span><span class="n">fascination</span><span class="o">.</span><span class="n">txt</span>
+<span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10002</span> <span class="n">poetry</span><span class="o">/</span><span class="n">science</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>あなたのシステムで上記のポート番号がすでに使われているようなら違うポート番号にしても構いません。最初のサーバはデフォルトの 10 バイトではなく 30 バイトずつにしていることに注意してください。この詩は他のに比べて三倍くらいの長さがあるからです。こうしておくと、だいたい同じくらいのタイミングで終わるようになります。</p>
+<p>それでは、詩を取得するために <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/blocking-client/get-poetry.py">blocking-client/get-poetry.py</a> のブロッキングクライアントを使いましょう。次のようにしてクライアントを実行します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">client</span><span class="o">/</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">.</span><span class="n">py</span> <span class="mi">10000</span> <span class="mi">10001</span> <span class="mi">10002</span>
+</pre></div>
+</div>
+<p>サーバの設定に合わせてポート番号を変えてください。これはブロッキングクライアントなので、完全な詩を受け取るまで待ち、次の詩が始めるのを待ちながら、それぞれのポート番号から交互に詩をダウンロードするでしょう。詩を出力する代わりに、ブロッキングクライアントは以下の出力を生成します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="n">get</span> <span class="n">poetry</span> <span class="n">from</span><span class="p">:</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10000</span>
+<span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="n">got</span> <span class="mi">3003</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10000</span> <span class="ow">in</span> <span class="mi">0</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mf">10.126361</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="n">get</span> <span class="n">poetry</span> <span class="n">from</span><span class="p">:</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10001</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="n">got</span> <span class="mi">623</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10001</span> <span class="ow">in</span> <span class="mi">0</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mf">06.321777</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">get</span> <span class="n">poetry</span> <span class="n">from</span><span class="p">:</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10002</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">653</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10002</span> <span class="ow">in</span> <span class="mi">0</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mf">06.617523</span>
+<span class="n">Got</span> <span class="mi">3</span> <span class="n">poems</span> <span class="ow">in</span> <span class="mi">0</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mf">23.065661</span>
+</pre></div>
+</div>
+<p>基本的にこれは”<a class="reference internal" href="p01.html#figure1"><span class="std std-ref">図１：同期モデル</span></a>”のテキスト版で、それぞれのタスクはひとつの詩をダウンロードすることです。あなたの環境ではちょっと違うかもしれませんし、サーバのタイミングパラメータを変更すれば変わってくるでしょう。パラメータを変更してみて、ダウンロード時間への影響を確認してみてください。</p>
+<p>ブロッキングサーバとクライアントのソースコードに目を通して、ネットワークデータを送受信する部分がソースコードのどの辺にあるは分かったでしょうか。</p>
+</div>
+<div class="section" id="id12">
+<h2>非同期クライアント<a class="headerlink" href="#id12" title="Permalink to this headline">¶</a></h2>
+<p>それでは、Twisted を使わないで書いた簡単な非同期クライアントを見ていきましょう。とりあえず動かしてみましょう。さっきと同じポートで三つのサーバが動作しているものとします。先ほど起動したものが動いていればそのままにしておいてください。非同期クライアント (<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/async-client/get-poetry.py">async-client/get-poetry.py</a> にあります) は次のようにして実行します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="k">async</span><span class="o">-</span><span class="n">client</span><span class="o">/</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">.</span><span class="n">py</span> <span class="mi">10000</span> <span class="mi">10001</span> <span class="mi">10002</span>
+</pre></div>
+</div>
+<p>こんな感じの出力になるでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="n">got</span> <span class="mi">30</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10000</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="n">got</span> <span class="mi">10</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10001</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="n">got</span> <span class="mi">10</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10002</span>
+<span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="n">got</span> <span class="mi">30</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10000</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="n">got</span> <span class="mi">10</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="kn">from</span> <span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">10001</span>
+<span class="o">...</span>
+<span class="n">Task</span> <span class="mi">1</span><span class="p">:</span> <span class="mi">3003</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span>
+<span class="n">Task</span> <span class="mi">2</span><span class="p">:</span> <span class="mi">623</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span>
+<span class="n">Task</span> <span class="mi">3</span><span class="p">:</span> <span class="mi">653</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span>
+<span class="n">Got</span> <span class="mi">3</span> <span class="n">poems</span> <span class="ow">in</span> <span class="mi">0</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mf">10.133169</span>
+</pre></div>
+</div>
+<p>今回は出力がちょっと長くなっています。非同期クライアントはサーバからダウンロードするごとに一行を出力しており、のんびりした詩のサーバはちょっとずつバイト列を送り出しているためです。パート１の”<a class="reference internal" href="p01.html#figure3"><span class="std std-ref">図３：非同期モデル</span></a>”のように、個別のタスクが一緒くたにまとめられていることに注意してください。</p>
+<p>どうやって非同期クライアントが、速いサーバに遅れないままで、遅いサーバのスピードに自動的に合わせるのかを確認するために、サーバの遅延設定を変えて (たとえば、あるサーバを他のサーバより遅くしてみる、とか) みてください。これこそが非同期の醍醐味です。</p>
+<p>全ての詩を取得するのに (上記のサーバ設定の場合は)、非同期クライアントは 10 秒くらいで終了するのに、同期クライアントは 23 秒くらいかかることにも注意してください。パート１の”<a class="reference internal" href="p01.html#figure3"><span class="std std-ref">図３：非同期モデル</span></a>”と”<a class="reference internal" href="p01.html#figure4"><span class="std std-ref">図４：同期プログラミングでのブロッキング</span></a>”の違いを思い出してください。ブロックする時間があまりありませんので、非同期クライアントは全体として短い時間で全ての詩をダウンロードできるのです。確かに、非同期クライアントでもブロックは発生しています。ゆったりしたサーバは遅いのです。単に非同期クライアントは全てのサーバへの対応を切り替えているため、ブロッキングクライアントに比べてブロックされる時間に多くを費やさないだけです。</p>
+<blockquote>
+<div><p>技術的なことを言えば、非同期クライアントはブロッキング操作を実行しています。
+標準出力のファイルディスクリプタに <code class="docutils literal notranslate"><span class="pre">print</span></code> 文で書き出しています。ここの例ではこれは問題になりません。
+<code class="docutils literal notranslate"><span class="pre">print</span></code> 文による出力を常に受け付けてくれる端末のローカルなマシンでは実際にはブロックしないでしょうし、サーバの遅さに比べれば素早く実行されます。
+しかし、プログラムをパイプライン処理の一部分にしてその中で非同期に処理したい場合は、標準入出力のための非同期入出力を使う必要があるでしょう。
+Twisted はこの機能をサポートしていますが、全体を単純化しておくために <code class="docutils literal notranslate"><span class="pre">print</span></code> 文を使います。この先の Twisted を用いたプログラムでもそうします。</p>
+</div></blockquote>
+</div>
+<div class="section" id="id13">
+<h2>もっと詳しく<a class="headerlink" href="#id13" title="Permalink to this headline">¶</a></h2>
+<p>それでは、非同期クライアントのソースコードに目を通してみてください。非同期と同期での主要な違いに気をつけてください。</p>
+<ol class="arabic simple">
+<li><p>非同期クライアントは、一度にひとつのサーバに接続するのではなく、一斉に全てのサーバに接続します。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">setblocking(0)</span></code> の呼び出しで、通信に使われるソケットオブジェクトはノンブロッキングモードになっています。</p></li>
+<li><p><a class="reference external" href="http://docs.python.org/library/select.html#module-select">select</a> モジュールの <code class="docutils literal notranslate"><span class="pre">select</span></code> メソッドを使うことで、ソケットがなんらかのデータを受け取れるようになるまで待つようにしています。</p></li>
+<li><p>サーバからのデータを読み込むときは、ソケットがブロックするまでに読める程度しか読み込みませんし、読むべきデータのあるソケットに処理を移します (もしあれば)。これは、それぞれのサーバからその時点までに受信した詩の内容を管理し続けなくてはならないことを意味します。</p></li>
+</ol>
+<p>非同期クライアントで核となる部分は、 <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> 関数の最上位のループです。このループは次のステップに分解できます。</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">select</span></code> を使い、ひとつ以上のソケットが読むべきデータを持つようになるまで、全ての有効なソケットを待ち受けます。</p></li>
+<li><p>読むべきデータのあるそれぞれのソケットに対して、データを読み込みます。ただし、その時に有効なだけのデータしか読み込みません。 <a class="reference external" href="http://en.wikipedia.org/wiki/Asynchronous_I/O">ブロックしてはいけません</a> 。</p></li>
+<li><p>全てのソケットが閉じられるまで繰り返します。</p></li>
+</ol>
+<p>同期クライアントにも (<code class="docutils literal notranslate"><span class="pre">main</span></code> 関数の中に) ループはありましたが、それぞれの繰り返し処理の中でひとつの詩を完全にダウンロードしていました。非同期クライアントにおける繰り返し処理では部分的にしかダウンロードしません。そして、ある繰り返し処理においてどの詩を扱っているか、どのくらいのデータ量を受信するかは分かりません。これらはすべてサーバの相対的なスピードとネットワークの状態にかかっています。どのソケットに対して処理するかを <code class="docutils literal notranslate"><span class="pre">select</span></code> に教えてもらい、ブロックしないようにそれぞれのソケットからデータを読み込むようにする外ありません。</p>
+<p>同期クライアントがいつも決まった数のサーバ (たとえば三つ) と通信しているならば、外側のループは全くいらなくなり、 <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> 関数を順番に三回呼び出すだけでよくなります。しかし、非同期クライアントでは外側のループをなくすことはできません。非同期の良さを活かすために、全てのソケットを待ち受け、その時々の繰り返し処理で読み込めるだけのデータに対して処理を進めなくてはなりません。</p>
+<p>イベントが発生するのを待ち受けそれを処理するループの使い方は、いわゆるデザインパターンにおける <a class="reference external" href="http://en.wikipedia.org/wiki/Reactor_pattern">reactor pattern</a> です。次の図５のように表せます。</p>
+<div class="figure align-default" id="id16">
+<span id="figure5"></span><img alt="_images/p02_reactor-1.png" src="_images/p02_reactor-1.png" />
+<p class="caption"><span class="caption-text">図５：同期モデル</span><a class="headerlink" href="#id16" title="Permalink to this image">¶</a></p>
+</div>
+<p>イベントを待って処理を行うので、ループは「reactor」です。イベントループともいわれます。reactive system は入出力を待つことが多いため、こうしたループは <a class="reference external" href="http://en.wikipedia.org/wiki/Asynchronous_I/O#Select.28.2Fpoll.29_loops">select loops</a> とも呼ばれます。 <code class="docutils literal notranslate"><span class="pre">select</span></code> の呼び出しは入出力を待つために使われるからです。 <code class="docutils literal notranslate"><span class="pre">select</span></code> ループの中では、「イベント」とはソケットが読み込みか書き込みができるようになったときです。入出力を待ち受ける方法は <code class="docutils literal notranslate"><span class="pre">select</span></code> だけではないことに注意してください。単に古くからある方法 (それゆえに広く利用可能) というだけです。異なるオペレーティングシステムで利用可能で、 <code class="docutils literal notranslate"><span class="pre">select</span></code> と同じことができて (願わくば) よりよい性能をもたらしてくれる新しい API もいくつかあります。しかし、性能のことに目をつむればどれでも同じことです。ソケットの集合 (実際はファイルディスクリプタ) を受け取って、ひとつ以上が入出力の準備ができるまでブロックするのです。</p>
+<blockquote>
+<div><p><code class="docutils literal notranslate"><span class="pre">select</span></code> やその類を使って、ブロックせずにファイルディスクリプタの集合が入出力の準備ができているかを単に確かめることもできます。
+この機能は reactive system がループの中で入出力を持たずに動作できるようにしてくれます。
+しかし、reactive systems では全ての処理が入出力に抑制されてしまう場合がしばしばありますので、全てのファイルディスクリプタをブロックすることで CPU 資源を節約できます。</p>
+</div></blockquote>
+<p>厳密な言い方をすれば、ここで示した非同期クライアントでのループは reactor pattern ではありません。ループのロジックが詩のサーバに特有である「ビジネスロジック」と分離されていないためです。全部ごっちゃになっています。reactor pattern の現実的な実装では、ループを次の機能を持つ抽象的なものに分けることになるでしょう。</p>
+<ol class="arabic simple">
+<li><p>入出力を監視したいファイルディスクリプタの集合を受け取ります。</p></li>
+<li><p>ファイルディスクリプタが入出力の準備ができたことを繰り返し知らせます。</p></li>
+</ol>
+<p>そして、本当に良い reactor pattern の実装は次のような機能も持つでしょう。</p>
+<ol class="arabic simple">
+<li><p>異なるシステムで出現する全てのおかしな場合を扱います。</p></li>
+<li><p>reactor を最低限の努力で使えるようにしてくれる多くの嬉しい抽象化を提供します。</p></li>
+<li><p>自由な発想で使える、よく知られたプロトコルの実装を提供します。</p></li>
+</ol>
+<p>これがまさに Twisted です。堅牢でクロスプラットフォームな Reactor Pattern およびそれ以上のたくさんのものの実装です。”<a class="reference internal" href="p03.html"><span class="doc">パート3: 目を向けてみましょう</span></a>”では、Twisted 版の Get Poetry Now に向けて単純な Twisted のプラグラムをいくつか書いていきます。</p>
+</div>
+<div class="section" id="id15">
+<h2>おすすめの練習問題<a class="headerlink" href="#id15" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>サーバの数や設定を変えて、ブロッキングの非同期クライアントでいくつかのタイミングを実験してみること。</p></li>
+<li><p>非同期クライアントで詩の内容を返すような <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> 関数を提供できるでしょうか？理由は？</p></li>
+<li><p>非同期クライアントで似たような方法で (それでも非同期に) 動く <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> 関数を欲しくなったときに、引数と戻り値はどのようなものになるでしょうか？</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p01.html">パート1: さあ、はじめましょう</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p03.html">パート3: 目を向けてみましょう</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

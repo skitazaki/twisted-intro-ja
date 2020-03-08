@@ -1,0 +1,712 @@
+===========================================
+パート20: 車輪の中の車輪: Twisted と Erlang
+===========================================
+..
+    <h2 class="lwe-editable-pre">Part 20: Wheels within Wheels: Twisted and Erlang
+
+はじめに
+========
+..
+    <h3 class="lwe-editable-pre">Introduction
+
+この連載を通して、同期の「普通の Python」コードと非同期の Twisted のコードを混在させることは単純なことではない、ということを明らかにしてきました。
+Twisted プログラムで不確定な時間のブロッキングがあると、非同期モデルを使って実現しようとしている利点の多くが失われてしまうからです。
+
+..
+    One fact we've uncovered in this series is that mixing synchronous "plain Python" code with asynchronous Twisted code is not a straightforward task,
+    since blocking for an indeterminate amount of time in a Twisted program will eliminate many of the benefits you are trying to achieve using the asynchronous model.
+
+今回が初めての非同期プログラミングへの入門ならば、ここまでで身に付けてきた知識はなんだか限定的であるかのように感じられるかもしれません。
+Twisted の中では新しいテクニックを使えますが、もっと広い世界である一般的な Python コードでは使えません。
+また、Twisted を使っていると、Twisted プログラムの一部として使うために記述されたライブラリを使うように限定されてしまいます。
+少なくとも reactor を動かしているスレッドからライブラリのコードを直接呼出したい場合にはそうなります。
+
+..
+    If this is your first introduction to asynchronous programming it may seem as if the knowledge you have gained is of somewhat limited applicability. You can use these new techniques inside of Twisted, but not in the much larger world of general Python code. And when working with Twisted, you are generally limited to libraries written specifically for use as part of a Twisted program, at least if you want to call them directly from the thread running the reactor.
+
+しかし非同期プログラミングのテクニックはとてもよく登場するものであり、Twisted に限ったものではありません。
+実際、Python に限っても、驚くべきほどたくさんの非同期プログラミングのフレームワークがあります。
+ちょっと `ググッてみる <http://www.google.com/search?q=python+async+frameworks>`_ と、それなりの数がきっと見つかるでしょう。
+細かい部分では Twisted とは異なりますが、基本的な考え方 (非同期 I/O, 複数のデータストリームにまたがった小さなチャンクでのデータ処理) は一緒です。
+そのため、Twisted とは異なるフレームワークを使う必要がある、もしくは選ぶなら、Twisted で学んできたことを活用できるでしょう。
+
+..
+    But asynchronous programming techniques have been around for quite some time and are hardly confined to Twisted.
+    There are in fact a startling number of asynchronous programming frameworks in Python alone. A bit of `searching around <http://www.google.com/search?q=python+async+frameworks>`_ will probably yield a couple dozen of them. They differ from Twisted in their details, but the basic ideas (asynchronous I/O, processing data in small chunks across multiple data streams) are the same. So if you need, or choose, to use an alternative framework you will already have a head start having learned Twisted.
+
+Python 以外に目を向けてみると、非同期プログラミングモデルを基礎とした、あるいは活用するための言語やシステムがたくさんあります。
+Twisted に関する知識は、この分野のさらに広大なことへの探求を手助けし続けてくれるでしょう。
+
+..
+    And moving outside of Python, there are plenty of other languages and systems that are either based around, or make use of, the asynchronous programming model. Your knowledge of Twisted will continue serve you as you explore the wider areas of this subject.
+
+このパートでは、 Erlang_ について目を通していきます。
+Erlang は非同期プログラミングの概念をとてもよく活用したプログラミング言語でありランタイムシステムです。しかし、独特の方法です。
+なお、ここでは Erlang に関する一般的な入門を意図していないことに気をつけてくださいね。
+むしろ、Erlang に組み込まれた考え方についてのちょっとした探検であり、Twisted における考え方とどのようなつながりがあるかを見ていきます。
+他の技術を学ぶときにも、Twisted を学ぶ中で身に付けてきた知識を適用できることが基本的なテーマです。
+
+..
+    In this Part we're going to take a very brief look at Erlang_, a programming language and runtime system that makes extensive use of asynchronous programming concepts, but does so in a unique way. Please note this is not meant as a general introduction to Erlang. Rather, it is a short exploration of some of the ideas embedded in Erlang and how they connect with the ideas in Twisted. The basic theme is the knowledge you have gained learning Twisted can be applied when learning other technologies.
+
+.. _Erlang: http://erlang.org/
+
+思い出されるコールバック
+========================
+..
+    <h3 class="lwe-editable-pre">Callbacks Reimagined
+
+":ref:`figure6`"を思い出してください。コールバックをグラフィカルに表現したものです。
+`Poetry Client 3.0 <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L1>`_ にある本質的なコールバックは、":doc:`p06`"で導入され、それ以降のすべての詩のクライアントは `dataReceived <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L56>`_ メソッドにあります。
+このコールバックは、接続した詩のサーバのひとつから詩を受け取る度に呼び出されます。
+
+..
+    Consider `Figure 6 <http://krondo.com/blog/?p=1333#figure6>`_, a graphical representation of a callback. The principle callback in `Poetry Client 3.0 <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L1>`_, introduced in `Part 6 <http://krondo.com/blog/?p=1595>`_, and all subsequent poetry clients is the `dataReceived <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-3/get-poetry.py#L56>`_ method. That callback is invoked each time we get a bit more poetry from one of the poetry servers we have connected to.
+
+クライアントが異なるみっつのサーバからみっつの詩をダウンロードしていると仮定しましょう。
+reactor の視点から見てみると (この連載でもっとも強く協調してきた観点です)、一回りする度にひとつ以上のコールバックを生成するひとつの大きなループを持ちます。
+図40を見てください。
+
+.. _figure40:
+
+.. figure:: images/p20_reactor-2.png
+
+    図40：reactor から見たコールバック
+
+..
+    Let's say our client is downloading three poems from three different servers. Looking at things from the point of view of the reactor (and that's the viewpoint we've emphasized the most in this series), we've got a single big loop which makes one or more callbacks each time it goes around. See Figure 40:
+    <div id="attachment_2706" class="wp-caption alignnone" style="width: 213px">` <./part20_files/reactor-2.png"><img class="size-full wp-image-2706" title="Figure 40: callbacks from the reactor viewpoint" src="./part20_files/reactor-2.png" alt="Figure 40: callbacks from the reactor viewpoint" width="203" height="286">`_<p class="wp-caption-text lwe-editable-pre">Figure 40: callbacks from the reactor viewpoint</div>
+
+この図は、reactor が詩を受け取ると、 ``dataReceived`` を呼び出しながら喜んで回り続ける様子を表します。
+``dataReceived`` のそれぞれの呼び出しはある特定の ``PoetryProtocol`` クラスのインスタンスに適用されます。
+そして、みっつの詩をダウンロードしていますから、みっつのインスタンスがあります (接続もみっつあります)。
+
+..
+    This figure shows the reactor happily spinning around, calling ``dataReceived`` as the poetry comes in. Each invocation of ``dataReceived`` is applied to one particular instance of our ``PoetryProtocol`` class. And we know there are three instances because we are downloading three poems (and so there must be three connections).
+
+これらの Protocol インスタンスの「ひとつ」の観点から、この図について考えてみましょう。
+それぞれのプロトコルはひとつの接続 (つまり、ひとつの詩) と一緒のことしか考えられていないことを思い出してください。
+このインスタンスはメソッド呼び出しの一連の流れ (stream) を「目撃」し、それぞれのメソッドは詩の次の部分を bearing します。
+こんな感じです。
+::
+
+    dataReceived(self, "When I have fears")
+    dataReceived(self, " that I may cease to be")
+    dataReceived(self, "Before my pen has glea")
+    dataReceived(self, "n'd my teeming brain")
+    ...
+
+..
+    Let's think about this picture from the point of view of ``one`` of those Protocol instances. Remember each Protocol is only concerned with a single connection (and thus a single poem). That instance "sees" a stream of method calls, each one bearing the next piece of the poem, like this:
+
+    dataReceived(self, "When I have fears")
+    dataReceived(self, " that I may cease to be")
+    dataReceived(self, "Before my pen has glea")
+    dataReceived(self, "n'd my teeming brain")
+    ...
+
+厳密に言えばこれは実際の Python ループではありませんが、次のように概念として表現できます。
+::
+
+    for data in poetry_stream(): # pseudo-code
+        dataReceived(data)
+
+..
+    While this isn't strictly speaking an actual Python loop, we can conceptualize it as one:
+
+    for data in poetry_stream(): # pseudo-code
+        dataReceived(data)
+
+図41で、このコールバックループ ("callback loop") をはっきりさせましょう。
+
+.. _figure41:
+
+.. figure:: images/p20_callback-loop.png
+
+    図41：仮想的なコールバックのループ
+
+..
+    We can envision this "callback loop" in Figure 41:
+    <div id="attachment_2718" class="wp-caption alignnone" style="width: 202px">` <./part20_files/callback-loop.png"><img class="size-full wp-image-2718" title="Figure 41: A virtual callback loop" src="./part20_files/callback-loop.png" alt="Figure 41: A virtual callback loop" width="192" height="168">`_<p class="wp-caption-text lwe-editable-pre">Figure 41: A virtual callback loop</div>
+
+繰り返しますが、これは ``for`` ループや ``while`` ループではありません。
+詩のクライアントにおける重要な Python のループは reactor だけです。
+しかし、それぞれのプロトコルを仮想的なループだと考えることもできます。特定の詩がやってくる度にくるくる回るのです。
+この考えだと、図42のようにクライアントの全体像をもう一度想像できます。
+
+.. _figure42:
+
+.. figure:: images/p20_reactor-3.png
+
+    図42：仮想的なループを回す reactor
+
+..
+    Again, this is not a ``for`` loop or a ``while`` loop. The only significant Python loop in our poetry clients is the reactor. But we can think of each Protocol as a virtual loop that ticks around once each time some poetry for that particular poem comes in. With that in mind we can re-imagine the entire client in Figure 42:
+    <div id="attachment_2723" class="wp-caption alignnone" style="width: 217px">` <./part20_files/reactor-3.png"><img class="size-full wp-image-2723" title="Figure 42: the reactor spinning some virtual loops" src="./part20_files/reactor-3.png" alt="Figure 42: the reactor spinning some virtual loops" width="207" height="260">`_<p class="wp-caption-text lwe-editable-pre">Figure 42: the reactor spinning some virtual loops</div>
+
+この図ではひとつの大きなループ (reactor) と三つの仮想的なループ (個別の詩のプロトコルインスタンス) があります。
+大きなループは回り続け、そうすることによって、連動ギアの集合のように仮想的なループを回し続けます。
+
+..
+    In this figure we have one big loop, the reactor, and three virtual loops, the individual poetry protocol instances. The big loop spins around and, in so doing, causes the virtual loops to tick over as well, like a set of interlocking gears.
+
+Erlang へ
+=========
+..
+    <h3 class="lwe-editable-pre">Enter Erlang
+
+Erlang_ は Python のように、汎用的な動的型付けのプログラミング言語です。元々は80年代に作られました。
+Python とは異なり、Erlang はオブジェクト指向というよりは関数型で、 Prolog_ を連想させる構文を持ちます。Prolog は Erlang が元々実装された言語です。
+Erlang は高い信頼性を持つ分散電話通信システムを構築するために設計されましたので、充実したネットワークサポートを持ちます。
+
+..
+    Erlang_, like Python, is a general purpose dynamically typed programming language originally created in the 80′s.  Unlike Python, Erlang is functional rather than object-oriented, and has a syntax reminiscent of Prolog_, the language in which Erlang was originally implemented. Erlang was designed for building highly reliable distributed telephony systems, and thus Erlang contains extensive networking support.
+
+.. _Prolog: http://en.wikipedia.org/wiki/Prolog
+
+Erlang の最も独特な機能のひとつは、軽量プロセスを含んだ並列モデル - concurrency model - です。
+Erlang のプロセスは OS のプロセスでもスレッドでもありません。
+むしろ、独自のスタックを持つ Erlang ランタイムの中で独立して動作する関数です。
+Erlang のプロセスは状態を共有できません (Erlang は関数型のプログラミング言語ですから、ほとんどのデータ型は変更不可能 - immutable - です) から軽量スレッドではありません。
+Erlang のプロセスはメッセージを送ることによってのみ他の Erlang プロセスとやり取りできます。
+そしてメッセージはいつも、少なくとも概念的には、コピーされますが決して共有されません。
+
+..
+    One of Erlang's most distinctive features is a concurrency model involving lightweight processes. An Erlang process is neither an operating system process nor an operating system thread. Rather, it is an independently running function inside the Erlang runtime with its own stack. Erlang processes are not lightweight threads because Erlang processes cannot share state (and most data types are immutable anyway, Erlang being a functional programming language). An Erlang process can interact with other Erlang processes only by sending messages, and messages are always, at least conceptually, copied and never shared.
+
+このため、 Erlang プログラムは図43のように見えます。
+
+.. _figure43:
+
+.. figure:: images/p20_erlang-11.png
+
+    図43：３つのプロセスがある Erlang プログラム
+
+..
+    So an Erlang program might look like Figure 43:
+    <div id="attachment_2735" class="wp-caption alignnone" style="width: 213px">` <./part20_files/erlang-11.png"><img class="size-full wp-image-2735" title="Figure 43: An Erlang program with three processes" src="./part20_files/erlang-11.png" alt="Figure 43: An Erlang program with three processes" width="203" height="290">`_<p class="wp-caption-text lwe-editable-pre">Figure 43: An Erlang program with three processes</div>
+
+Python におけるオブジェクトのように Erlang におけるプロセスは第一級コンストラクト - first-class consutructs - ですから、この図では個別のプロセスは実際に存在 ("real") します。
+一方でランタイムは仮想的なもの ("virtual") です。存在しないからではなく、必ずしも単純なループではないからです。
+Erlang ランタイムはマルチスレッドかもしれませんし、full-blown プログラミング言語を実装できるように、非同期 I/O を扱う部分に多くの責任を持ちます。
+さらに、言語のランタイムは全くもって追加コンストラクトではありません。
+Twisted における reactor のように、 Erlang がプロセスとコードを実行するメディアだからです。
+
+..
+    In this figure the individual processes have become "real", since processes are first-class constructs in Erlang, just like objects are in Python. And the runtime has become "virtual", not because it isn't there, but because it's not necessarily a simple loop.
+    The Erlang runtime may be multi-threaded and, as it has to implement a full-blown programming language, it's in charge of a lot more than handling asynchronous I/O.
+    Furthermore, a language runtime is not so much an extra construct, like the reactor in Twisted, as the medium in which the Erlang processes and code execute.
+
+Erlang プログラムのより良い描き方は図44のようになるかもしれません。
+
+.. _figure44:
+
+.. figure:: images/p20_erlang-2.png
+
+    図44：いくつかのプロセスがある Erlang プログラム
+
+..
+    So an even better picture of an Erlang program might be Figure 44:
+    <div id="attachment_2738" class="wp-caption alignnone" style="width: 343px">` <./part20_files/erlang-2.png"><img class="size-full wp-image-2738" title="Figure 44: An Erlang program with several processes" src="./part20_files/erlang-2.png" alt="Figure 44: An Erlang program with several processes" width="333" height="239">`_<p class="wp-caption-text lwe-editable-pre">Figure 44: An Erlang program with several processes</div>
+
+もちろん Erlang ランタイムは非同期 I/O とひとつ以上の select ループを使いません。Erlang は膨大なプロセスを生成できるようにしてくれるからです。
+巨大な Erlang プログラムは何十、何百、何千という Erlang プロセスを開始させますので、実際の OS スレッドにそれぞれを割り当てるなんてことは問題外です。
+Erlang が複数のプロセスに入出力操作を許可し、その入出力がブロックしても他のプロセスが実行できるようなら、非同期入出力が必要になりますよね。
+
+..
+    Of course, the Erlang runtime does have to use asynchronous I/O and one or more select loops, because Erlang allows you to create ``lots`` of processes. Large Erlang programs can start tens or hundreds of thousands of Erlang processes, so allocating an actual OS thread to each one is simply out of the question. If Erlang is going to allow multiple processes to perform I/O, and still allow other processes to run even if that I/O blocks, then asynchronous I/O will have to be involved.
+
+Erlang プログラムの図では、コールバックによってくるくる回っているのではなく、それぞれのプロセスが自力で (訳注: "under its own power") 動いていることに注意してください。
+ここがとても大事な部分です。
+Erlang ランタイムの仕組みに組み込まれた reactor のジョブがあると、コールバックはもはや中心的な役割を持ちません。
+Twisted ではコールバックを使うことによって解決された問題は、Erlang では非同期メッセージをプロセスから他のプロセスへ送信することで解決します。
+
+..
+    Note that our picture of an Erlang program has each process running "under its own power", rather than being spun around by callbacks. And that is very much the case. With the job of the reactor subsumed into the fabric of the Erlang runtime, the callback no longer has a central role to play. What would, in Twisted, be solved by using a callback would, in Erlang, be solved by sending an asynchronous message from one Erlang process to another.
+
+Erlang による詩のクライアント
+=============================
+..
+    <h3 class="lwe-editable-pre">An Erlang Poetry Client
+
+Erlang による詩のクライアントを見ていきましょう。
+Twisted でやってきたようにゆっくりと構築していくのではなく、一気に動くバージョンを扱います。
+繰り返しになりますが、これは完全な Erlang 入門を意図していません。
+とはいえ、このエントリが興味をそそるなら、このパートの終わりでもっと深く学ぶために読むべき書籍を紹介します。
+
+..
+    Let's look at an Erlang poetry client. We're going to jump straight to a working version instead of building up slowly like we did with Twisted. Again, this isn't meant as a complete Erlang introduction. But if it piques your interest, we suggest some more in-depth reading at the end of this Part.
+
+Erlang のクライアントは `erlang-client-1/get-poetry <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L1>`_ にあります。
+実行させるためには、もちろん Erlang_ をインストールする必要があります。
+`main <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L96>`_ 関数のコードはこのようになります。
+これは、 Python クライアントでの main 関数と似た目的を果たします。
+::
+
+    main([]) ->
+        usage();
+
+    main(Args) ->
+        Addresses = parse_args(Args),
+        Main = self(),
+        [erlang:spawn_monitor(fun () -> get_poetry(TaskNum, Addr, Main) end)
+         || {TaskNum, Addr} <- enumerate(Addresses)],
+        collect_poems(length(Addresses), []).
+
+..
+    The Erlang client is listed in `erlang-client-1/get-poetry <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L1>`_. In order to run it you will, of course, need Erlang_ installed. Here's the code for the `main <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L96>`_ function, which serves a similar purpose as the main functions in our Python clients:
+    ::
+
+    main([]) ->
+        usage();
+
+    main(Args) ->
+        Addresses = parse_args(Args),
+        Main = self(),
+        [erlang:spawn_monitor(fun () -> get_poetry(TaskNum, Addr, Main) end)
+         || {TaskNum, Addr} <- enumerate(Addresses)],
+        collect_poems(length(Addresses), []).
+
+これまでに Prolog かそれと似たような言語を見たことがないと、 Erlang の構文はちょっと奇妙に見えるかもしれません。
+しかし、Python について同じように言う人もいます。
+メイン関数は、セミコロンによって分割されたふたつの clauses によって定義されています。
+Erlang は引数マッチによって動かすべき clause を選びますので、最初の clause はコマンドライン引数を与えることなくクライアントを起動したときのみ実行され、ヘルプメッセージを出力します。
+ふたつ目の clause がアクションの中心となります。
+
+..
+    If you've never seen Prolog or a similar language before then Erlang syntax is going to seem a little odd. But some people say that about Python, too. The main function is defined by two separate clauses, separated by a semicolon. Erlang chooses which clause to run by matching the arguments, so the first clause only runs if we execute the client without providing any command line arguments, and it just prints out a help message. The second clause is where all the action is.
+
+Erlang の関数における独立した文はコンマで分割され、すべての関数はピリオドで終わります。
+ふたつ目の clause におけるそれぞれの行を順番にみていきましょう。
+１行目はコマンドライン引数を処理し、その結果を変数に束縛します (Erlang における全ての変数は大文字から始めなくてはいけません - capitalized)。
+２行目は、 現在実行中の Erlang プロセス (OS のプロセスではありません) のプロセス ID を取得するために、Erlang の ``self`` 関数を使っています。
+これがメイン関数ですから、Python での ``__main__`` モジュールと同じものだと考えてください。
+３行目はもっとも興味深いですね。
+::
+
+    [erlang:spawn_monitor(fun () -> get_poetry(TaskNum, Addr, Main) end)
+         || {TaskNum, Addr} <- enumerate(Addresses)],
+
+..
+    Individual statements in an Erlang function are separated by commas, and all functions end with a period. Let's take each line in the second clause one at a time. The first line is just parsing the command line arguments and binding them to a variable (all variables in Erlang must be capitalized). The second line is using the Erlang ``self`` function to get the process ID of the currently running Erlang process (not OS process). Since this is the main function you can kind of think of it as the equivalent of the ``__main__`` module in Python. The third line is the most interesting:
+    ::
+
+    [erlang:spawn_monitor(fun () -> get_poetry(TaskNum, Addr, Main) end)
+         || {TaskNum, Addr} <- enumerate(Addresses)],
+
+この statement は Erlang のリスト内包表記 - list comprehension - で、Python での構文に似ています。
+新しい Erlang プロセスを spawning します。このプロセスは、接続する必要のある詩のサーバのそれぞれになります。
+それぞれのプロセスは同じ関数 (``get_poetry``) を実行するでしょうが、サーバに固有の引数は別々です。
+新しいプロセスが詩を送り返せるように (一般的にプロセスにメッセージを送るためには、その PID が必要になります)、メインプロセスの PID も渡します。
+
+..
+    This statement is an Erlang list comprehension, with a syntax similar to that in Python. It is spawning new Erlang processes, one for each poetry server we need to contact. And each process will run the same function (``get_poetry``) but with different arguments specific to that server. We also pass the PID of the main process so the new processes can send the poetry back (you generally need the PID of a process to send a message to it).
+
+``main`` の最後の一文で ``collect_poems`` 関数を呼び出します。この関数は詩がやってくることと ``get_poetry`` プロセスが終了することを待ちます。
+他の関数についてももう少し見ていきますが、まずは Erlang の
+`main <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L96>`_ 関数と、Twisted クライアントで `等価な main <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L96>`_ 関数を比べてみましょうか。
+
+..
+    The last statement in ``main`` calls the ``collect_poems`` function which waits for the poetry to come back and for the ``get_poetry`` processes to finish. We'll look at the other functions in a bit, but first you might compare this Erlang
+    `main <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L96>`_ function to the `equivalent main <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-4/get-poetry.py#L96>`_ in one of our Twisted clients.
+
+それでは Erlang の ``get_poetry`` 関数に目を通していきましょう。
+``get_poetry`` というスクリプトには実際にはふたつの関数があります。
+Erlang では、関数は名前と arity の両方で識別されますので、スクリプトはふたつの別々の関数を含みます。
+それぞれ三つと四つの引数を受け付ける ``get_poetry/3`` と ``get_poetry/4`` です。
+`get_poetry/3 <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L79>`_ は次のようになり、 ``main`` によって spawn されます。
+::
+
+    get_poetry(Tasknum, Addr, Main) ->
+        {Host, Port} = Addr,
+        {ok, Socket} = gen_tcp:connect(Host, Port,
+                                       [binary, {active, false}, {packet, 0}]),
+        get_poetry(Tasknum, Socket, Main, []).
+
+..
+    Now let's look at the Erlang ``get_poetry`` function. There are actually two functions in our script called ``get_poetry``. In Erlang, a function is identified by both name and arity, so our script contains two separate functions, ``get_poetry/3`` and ``get_poetry/4`` which accept three and four arguments respectively. Here's `get_poetry/3 <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L79>`_, which is spawned by ``main``:
+    ::
+
+    get_poetry(Tasknum, Addr, Main) ->
+        {Host, Port} = Addr,
+        {ok, Socket} = gen_tcp:connect(Host, Port,
+                                       [binary, {active, false}, {packet, 0}]),
+        get_poetry(Tasknum, Socket, Main, []).
+
+この関数は、Twisted クライアントの ``get_poetry`` と同じように、まずは TCP 接続を生成します。
+しかし、そこで処理を戻すのではなく、 `get_poetry/4 <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L85>`_ を呼び出すことでその TCP 接続を使い続けます。
+``get_poetry/4`` は次の通りです。
+::
+
+    get_poetry(Tasknum, Socket, Main, Packets) ->
+        case gen_tcp:recv(Socket, 0) of
+            {ok, Packet} ->
+                io:format("Task ~w: got ~w bytes of poetry from ~s\n",
+                          [Tasknum, size(Packet), peername(Socket)]),
+                get_poetry(Tasknum, Socket, Main, [Packet|Packets]);
+            {error, _} ->
+                Main ! {poem, list_to_binary(lists:reverse(Packets))}
+        end.
+
+..
+    This function first makes a TCP connection, just like the Twisted client ``get_poetry``. But then, instead of returning, it proceeds to use that TCP connection by calling `get_poetry/4 <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L85>`_, listed below:
+    ::
+
+    get_poetry(Tasknum, Socket, Main, Packets) ->
+        case gen_tcp:recv(Socket, 0) of
+            {ok, Packet} ->
+                io:format("Task ~w: got ~w bytes of poetry from ~s\n",
+                          [Tasknum, size(Packet), peername(Socket)]),
+                get_poetry(Tasknum, Socket, Main, [Packet|Packets]);
+            {error, _} ->
+                Main ! {poem, list_to_binary(lists:reverse(Packets))}
+        end.
+
+この Erlang 関数は Twisted クライアントでは ``PoetryProtocol`` が果たしていたことをやっています。Twisted 版ではブロックする関数呼び出しを使いますが、Erlang 版はそうではありません。
+``gen_tcp:recv`` 関数はソケットへのデータ到着 (もしくはソケットが閉じられること) を待ち受けます。どれだけ長くなろうとも。
+しかし、Erlang での "blocking" 関数は、関数を実行しているプロセスをブロックするだけで、Erlang ランタイム全体をブロックするわけではありません。
+この TCP ソケットは本当はブロックしているソケットではありません (ピュア Erlang コードでは、真にブロックするソケットを生成できません)。
+こうしたそれぞれの Erlang ソケットのために、Erlang ランタイムの中のどこかに、ノンブロッキングモードに設定された「本物の」TCP ソケットがあり、select ループの一部として使われます。
+
+..
+    This Erlang function is doing the work of the ``PoetryProtocol`` from our Twisted client, except it does so using blocking function calls. The ``gen_tcp:recv`` function waits until some data arrives on the socket (or the socket is closed), however long that might be. But a "blocking" function in Erlang only blocks the process running the function, not the entire Erlang runtime. That TCP socket isn't really a blocking socket (you can't make a true blocking socket in pure Erlang code). For each of those Erlang sockets there is, somewhere inside the Erlang runtime, a "real" TCP socket set to non-blocking mode and used as part of a select loop.
+
+しかし、Erlang プロセスこれらに関して何も知りません。
+ただただデータが届くのを待ち、もしもブロックするなら、他の Erlang プロセスが動くことになります。
+プロセスは決してブロックしなくとも、Erlang ランタイムはいつでも実行プロセスを自由に切り替えられます。
+言い換えると、Erlang は 非協調並行モデル - non-cooperative concurrency model - を持ちます。
+
+..
+    But the Erlang process doesn't have to know about any of that. It just just waits for some data to arrive and, if it blocks, some other Erlang process can run instead. And even if a process never blocks, the Erlang runtime is free to switch execution from that process to another at any time. In other words, Erlang has a non-cooperative concurrency model.
+
+詩の一部を受け取った後に、 ``get_poetry/4`` が再帰的に自分自身を呼び出して実行することに注意しましょう。
+imperative な言語のプログラマにとっては、メモリを使い果たしてしまう (out of memory) レシピのように見えるかもしれませんね。
+しかし Erlang コンパイラーは末尾呼び出し ("tail" calls - 関数の最後にある関数呼び出し) をループに最適化できます。
+このことは、Erlang と Twisted クライアントの間に横たわるもうひとつの興味深い点をハイライトしてくれます。
+Twisted クライアントでは、reactor が何度も繰り返し同じ関数 (``dataReceived``) を呼び出すことによって "virtual" ループが生成されました。
+Erlang クライアントでは、 `tail-call optimization <http://stackoverflow.com/questions/310974/what-is-tail-call-optimization>`_ を使って、自分自身 (``themselves``) を繰り返し呼び出すことによって実行中の "real" プロセス (``get_poetry/4``) がループを形成します。
+どうでしょうか。
+
+..
+    Notice that ``get_poetry/4``, after receiving a bit of poem, proceeds by recursively calling itself. To an imperative language programmer this might seem like a recipe for running out of memory, but the Erlang compiler can optimize "tail" calls (function calls that are the last statement in a function) into loops. And this highlights another curious parallel between the Erlang and Twisted clients. In the Twisted client, the "virtual" loops are created by the reactor calling the same function (``dataReceived``) over and over again. And in the Erlang client, the "real" processes running (``get_poetry/4``) form loops by calling ``themselves`` over and over again via `tail-call optimization <http://stackoverflow.com/questions/310974/what-is-tail-call-optimization>`_. How about that.
+
+接続が閉じられると、 ``get_poetry`` が最後にすべきはメインプロセスへの詩の送信です。
+また、それ以上にすべきことが何もなくなるように、 ``get_poetry`` が実行しているプロセスを終了させます。
+
+..
+    If the connection is closed, the last thing ``get_poetry`` does is send the poem to the main process. That also ends the process that ``get_poetry`` is running, as there is nothing left for it to do.
+
+Erlang クライアントで残る主要な関数は、 `collect_poems <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L58>`_ です。
+::
+
+    collect_poems(0, Poems) ->
+        [io:format("~s\n", [P]) || P <- Poems];
+    collect_poems(N, Poems) ->
+        receive
+            {'DOWN', _, _, _, _} ->
+                collect_poems(N-1, Poems);
+            {poem, Poem} ->
+                collect_poems(N, [Poem|Poems])
+        end.
+
+..
+    The remaining key function in our Erlang client is `collect_poems <http://github.com/jdavisp3/twisted-intro/blob/master/erlang-client-1/get-poetry#L58>`_:
+    ::
+
+    collect_poems(0, Poems) ->
+        [io:format("~s\n", [P]) || P <- Poems];
+    collect_poems(N, Poems) ->
+        receive
+            {'DOWN', _, _, _, _} ->
+                collect_poems(N-1, Poems);
+            {poem, Poem} ->
+                collect_poems(N, [Poem|Poems])
+        end.
+
+この関数はメインプロセスによって実行され、 ``get_poetry`` のように、自分自身を再帰的にループします。
+またブロックもします。
+``receive`` 文は与えられたパターンにマッチするメッセージが届くのを待つようにプロセスに伝えます。
+受け取ったら「メールボックス」 ("mailbox") からメッセージを展開します。
+
+..
+    This function is run by the main process and, like ``get_poetry``, it recursively loops on itself. It also blocks.
+    The ``receive`` statement tells the process to wait for a message to arrive that matches one of the given patterns,
+    and then extract the message from its "mailbox".
+
+``collect_poems`` 関数は二種類のメッセージを待ちます。詩と "DOWN" 通知です。
+後者は、 ``get_poetry`` プロセスのひとつが何らかの理由で死んでしまったときにメインプロセスに送信されるメッセージです (これは ``spawn_monitor`` の一部である ``monitor`` です)。
+``DOWN`` メッセージを数えることによって、全ての詩を受け取ることが完了したときが分かります。
+前者は、 ``get_poetry`` プロセスのひとつからのひとつの完全な詩を含んでいるメッセージです。
+
+..
+    The ``collect_poems`` function waits for two kinds of messages: poems and "DOWN" notifications. The latter is a message sent to the main process when one of the ``get_poetry`` processes dies for any reason (this is the ``monitor`` part of ``spawn_monitor``). By counting ``DOWN`` messages, we know when all the poetry has finished. The former is a message from one of the ``get_poetry`` processes containing one complete poem.
+
+よし、Erlang クライアントを動かしてみましょう。
+まずはゆっくりした詩のサーバ (slow poetry server) を三つ立ち上げます。
+::
+
+    python blocking-server/slowpoetry.py --port 10001 poetry/fascination.txt
+    python blocking-server/slowpoetry.py --port 10002 poetry/science.txt
+    python blocking-server/slowpoetry.py --port 10003 poetry/ecstasy.txt --num-bytes 30
+
+..
+    Ok, let's take the Erlang client out for a spin. First start up three slow poetry servers:
+    ::
+
+    python blocking-server/slowpoetry.py --port 10001 poetry/fascination.txt
+    python blocking-server/slowpoetry.py --port 10002 poetry/science.txt
+    python blocking-server/slowpoetry.py --port 10003 poetry/ecstasy.txt --num-bytes 30
+
+ようやく Erlang クライアントを実行できます。これは Python クライアントと似たコマンドライン構文を持ちます。
+Linux か UNIX-like なシステムならクライアントを直接実行できます (Erlang がインストールされていて、 ``PATH`` が有効だと仮定しています)。
+Windows ではおそらく、Erlang クライアントへのパスを最初の引数として (残りは Erlang クライアント自身への引数です)、 ``escript`` プログラムを実行する必要があるでしょう。
+::
+
+    ./erlang-client-1/get-poetry 10001 10002 10003
+
+..
+    Now we can run the Erlang client, which has a similar command-line syntax as the Python clients. If you are on a Linux or other UNIX-like system, then you should be able to run the client directly (assuming you have Erlang installed and available in your ``PATH``). On Windows you will probably need to run the ``escript`` program, with the path to th Erlang client as the first argument (with the remaining arguments for the Erlang client itself).
+    ::
+
+    ./erlang-client-1/get-poetry 10001 10002 10003
+
+実行させてみるとこのような出力が見えるはずです。
+::
+
+    Task 3: got 30 bytes of poetry from 127:0:0:1:10003
+    Task 2: got 10 bytes of poetry from 127:0:0:1:10002
+    Task 1: got 10 bytes of poetry from 127:0:0:1:10001
+    ...
+
+..
+    After that you should see output like this:
+    ::
+
+    Task 3: got 30 bytes of poetry from 127:0:0:1:10003
+    Task 2: got 10 bytes of poetry from 127:0:0:1:10002
+    Task 1: got 10 bytes of poetry from 127:0:0:1:10001
+    ...
+
+これは以前の Python クライアントの出力そのものです。受け取った詩の断片を出力させます。
+すべての詩を受け取ると、クライアントはそれぞれの完全な文字列を出力するでしょう。
+クライアントは、送信すべき詩が存在するか否かに従って全てのサーバに対して接続をあちこちと切り替えていることに注意しましょう。
+
+..
+    This is just like one of our earlier Python clients where we print a message for each little bit of poetry we get.
+    When all the poems have finished the client should print out the complete text of each one.
+    Notice the client is switching back and forth between all the servers depending on which one has some poetry to send.
+
+図45は Erlang クライアントのプロセス構造を図示してくれます。
+
+.. _figure45:
+
+.. figure:: images/p20_erlang-3.png
+
+    図45：Erlang での詩のクライアント
+
+..
+    Figure 45 shows the process structure of our Erlang client:
+    <div id="attachment_2768" class="wp-caption alignnone" style="width: 284px">` <./part20_files/erlang-3.png"><img class="size-full wp-image-2768" title="Figure 45: Erlang poetry client" src="./part20_files/erlang-3.png" alt="Figure 45: Erlang poetry client" width="274" height="236">`_<p class="wp-caption-text lwe-editable-pre">Figure 45: Erlang poetry client</div>
+
+この図はみっつの ``get_poetry`` プロセス (サーバごとにひとつです) と、ひとつのメインプロセスを表します。
+詩のプロセスからメインプロセスへ流れるメッセージも見えますね。
+
+..
+    This figure shows three ``get_poetry`` processes (one per server) and one main process.
+    You can also see the messages that flow from the poetry processes to main process.
+
+それでは、これらのサーバのひとつがダウンしたら何が起こるでしょうか？
+やってみましょう。
+::
+
+    ./erlang-client-1/get-poetry 10001 10005
+
+..
+    So what happens if one of those servers is down? Let's try it:
+    ::
+
+    ./erlang-client-1/get-poetry 10001 10005
+
+上のコマンドは有効なポート (前述の詩のサーバは全て動作し続けていると仮定) と有効でないポート (10005番ポートを使っているサーバは存在しないと仮定) を含みます。
+すると、このような出力が見られますね。
+::
+
+    Task 1: got 10 bytes of poetry from 127:0:0:1:10001
+
+    =ERROR REPORT==== 25-Sep-2010::21:02:10 ===
+    Error in process <0.33.0> with exit value: {{badmatch,{error,econnrefused}},[{erl_eval,expr,3}]}
+
+    Task 1: got 10 bytes of poetry from 127:0:0:1:10001
+    Task 1: got 10 bytes of poetry from 127:0:0:1:10001
+    ...
+
+..
+    The above command contains one active port (assuming you left all the earlier poetry servers running) and one inactive port (assuming you aren't running any server on port 10005). And we get some output like this:
+    ::
+
+    Task 1: got 10 bytes of poetry from 127:0:0:1:10001
+
+    =ERROR REPORT==== 25-Sep-2010::21:02:10 ===
+    Error in process <0.33.0> with exit value: {{badmatch,{error,econnrefused}},[{erl_eval,expr,3}]}
+
+    Task 1: got 10 bytes of poetry from 127:0:0:1:10001
+    Task 1: got 10 bytes of poetry from 127:0:0:1:10001
+    ...
+
+時折、クライアントはアクティブなサーバから詩をダウンロードし終えて、詩を出力してから終了します。
+それでは、 ``main`` 関数が両方のプロセスが完了したことを知っていたらどうなるでしょうか？
+そのエラーメッセージが clue です。
+``get_poetry`` がサーバへの接続を試みて、期待する値 (``{ok, Socket}``) ではなく接続拒否のエラーを受け取ったときに、このエラーが発生します。
+Erlang の "assignment" 文は実際にはパターンマッチ操作であるため、結果となる例外は ``badmatch`` と呼ばれます。
+
+..
+    And eventually the client finishes downloading the poem from the active server, prints out the poem, and exits.
+    So how did the ``main`` function know that both processes were done? That error message is the clue.
+    The error happens when ``get_poetry`` tries to connect to the server and gets a connection refused error instead of the expected value (``{ok, Socket}``).
+    The resulting exception is called ``badmatch`` because Erlang "assignment" statements are really pattern-matching operations.
+
+Erlang プロセス内で処理されていない例外はプロセスをクラッシュさせます。
+これは、プロセスが停止し、そのプロセスに関する全てのリソースが回収 - garbage collected - されたことを意味します。
+しかし、これらのプロセスが何らかの理由で動作を終了したら、 ``main`` プロセス、これはすべての ``get_poetry`` プロセスを監視しています、は ``DOWN`` メッセージを受け取るでしょう。
+というわけで、クライアントは永遠に実行を続けるのではなく、終了します。
+
+..
+    An unhandled exception in an Erlang process causes the process to "crash", which means the process stops running and all of its resources are garbage collected.
+    But the ``main`` process, which is monitoring all of the ``get_poetry`` processes, will receive a ``DOWN`` message when any of those processes stops running for any reason.
+    And thus our client exits when it should instead of running forever.
+
+議論
+====
+..
+    <h3 class="lwe-editable-pre">Discussion
+
+Twisted と Erlang クライアントの間にある共通項を押さえておきましょう。
+
+* どちらのクライアントも一度に全ての詩のサーバに接続 (あるいは接続しようと) します。
+* どちらのクライアントも、どのサーバが運んできたかに関わらず、データがやってくるとすぐに受け取ります。
+* どちらのクライアントも少しずつ詩を処理しますので、そこまでに受け取ってきた詩の断片を保存しておく必要があります。
+* どちらのクライアントも、ある特定のサーバに対するすべての仕事を処理するために、"object" (Python オブジェクトか Erlang プロセスのどちらか) を生成します。
+* どちらのクライアントも、特定のダウンロードが成功したか失敗したかに関わらず、全ての詩を処理し終えたときを注意深く決定しなくてはなりません。
+
+..
+    Let's take stock of some of the parallels between the Twisted and Erlang clients:
+
+    * Both clients connect (or try to connect) to all the poetry servers at once.
+    * Both clients receive data from the servers as soon as it comes in, regardless of which server delivers the data.
+    * Both clients process the poetry in little bits, and thus have to save the portion of the poems received thus far.
+    * Both clients create an "object" (either a Python object or an Erlang process) to handle all the work for one particular server.
+    * Both clients have to carefully determine when all the poetry has finished, regardless of whether a particular download succeeded or failed.
+
+最後に、どちらのクライアントでも ``main`` 関数は非同期に詩とタスク完了 ("task done") 通知を受信します。
+Twisted クライアントでは、この情報は ``Deferred`` によって伝達されます。一方、 Erlang クライアントはプロセス間でメッセージを受け取ります。
+
+..
+    And finally, the ``main`` functions in both clients asynchronously receive poems and "task done" notifications.
+    In the Twisted client this information is delivered via a ``Deferred`` while the Erlang client receives inter-process messages.
+
+戦略全体とコード構造の両方において、両方のクライアントにどれほどの類似点があるかに注意しましょう。
+一方ではオブジェクト、遅延オブジェクト、それからコールバックを使い、もう一方ではプロセスとメッセージを使いますので、メカニズムはちょっと違います。
+しかし、高レベルでのメンタルモデルはとても似ています。
+双方に慣れ親しんでしまえば、どちらかからもう一方に移動するのはとても簡単なことでしょう。
+
+..
+    Notice how similar both clients are, in both their overall strategy and the structure of their code.
+    The mechanics are a bit different, with objects, deferreds, and callbacks on the one hand and processes and messages on the other.
+    But the high-level mental models of both clients are quite similar, and it's pretty easy to move from one to the other once you are familiar with both.
+
+Erlang クライアントでは reactor パターンでさえ非常に小型化された形式で再度出現します。
+詩のクライアントにおけるそれぞれの Erlang プロセスは時々再帰的なループになります。
+
+* 何かが起きることを待ち (詩の断片が届く、とか、詩が転送される、とか、もうひとつのプロセスが完了する、など)、
+* いくつかの適切なアクションを実行します。
+
+..
+    Even the reactor pattern reappears in the Erlang client in miniaturized form.
+    Each Erlang process in our poetry client eventually turns into a recursive loop that:
+
+    * Waits for something to happen (a bit of poetry comes in, a poem is delivered, another process finishes), and
+    * Takes some appropriate action.
+
+Erlang プログラムを、小さな reactor がたくさん集まったものだと考えることもできます。
+それぞれが spinning し、時々小さな reactor にメッセージを送るのです (他のイベントと同じようにそのメッセージを処理するでしょう)。
+
+..
+    You can think of an Erlang program as a big collection of little reactors, each spinning around and occasionally sending a message to another little reactor (which will process that message as just another event).
+
+もしも Erlang についてより深く学ぼうと思ったら、コールバックを見える化しましょう。
+Erlang の `gen_server <http://www.erlang.org/doc/man/gen_server.html>`_ プロセスは、固定数のコールバック関数を提供することによってインスタンス化 ("instantiate") する、汎用的な reactor ループです。
+これは、Erlang システムのそこここで繰り返し現れるパターンです。
+
+..
+    And if you delve deeper into Erlang you will find callbacks making an appearance.
+    The Erlang `gen_server <http://www.erlang.org/doc/man/gen_server.html>`_ process is a generic reactor loop that you "instantiate" by providing a fixed set of callback functions, a pattern repeated elsewhere in the Erlang system.
+
+Twisted を学んだ後で、もしも Erlang をやってみようと思ったなら、慣れ親しんだメンタルテリトリー (familiar mental territory) にあると気付くでしょう。
+
+..
+    So if, having learned Twisted, you ever decide to give Erlang a try I think you will find yourself in familiar mental territory.
+
+さらに読むべきもの
+==================
+..
+    <h3 class="lwe-editable-pre">Further Reading
+
+このパートでは、Twisted と Erlang で共通したことに焦点を当ててきました。しかしもちろん、違う部分もたくさんあります。
+Erlang 独特の機能として、エラー処理のアプローチがあります。
+巨大な Erlang プログラムは、上位の枝分かれ (higher branches) にスーパーバイザー ("supervisors") を持ち、葉にワーカー ("workers") を持つ、プロセスの木として構成されます。
+もしもワーカープロセスがクラッシュすると、スーパーバイザープロセスが気付き、いくつかのアクションを引き継ぐでしょう (典型的には、失敗したワーカーを再起動させます)。
+
+..
+    In this Part we've focused on the similarities between Twisted and Erlang, but there are of course many differences.
+    One particularly unique feature of Erlang is its approach to error handling.
+    A large Erlang program is structured as a tree of processes, with "supervisors" in the higher branches and "workers" in the leaves.
+    And if a worker process crashes, a supervisor process will notice and take some action (typically restarting the failed worker).
+
+Erlang についてもっと学習したくなったらツイテますね。
+いくつかの Erlang 本が最近になって出版されたか、まもなく出版 ([1]_) されます。
+
+* `Programming Erlang <http://www.amazon.com/exec/obidos/ASIN/193435600X/krondonet-20>`_ —
+  Erlang 開発者のひとりによって書かれた書籍です。言語への素晴らしい入門編です。
+* `Erlang Programming <http://www.amazon.com/exec/obidos/ASIN/0596518188/krondonet-20>`_ —
+  Armstrong の書籍を補完し、いくつかの主要な領域についてより深く記述されています。
+* `Erlang and OTP in Action <http://www.amazon.com/exec/obidos/ASIN/1933988789/krondonet-20>`_ —
+  この書籍はまだ発売されていませんが、手元に届くのが待ちきれません。
+  上のふたつの本は OTP には言及していません。OTP は Erlang  で大きなアプリケーションを構築するためのフレームワークです。
+  ちなみに、著者のふたりは私の友達です。
+
+.. [1] 2010年12月に出版されました。
+
+..
+    If you are interested in learning more Erlang then you are in luck. Several Erlang books have either been published recently, or will be published shortly:
+
+    * `Programming Erlang <http://www.amazon.com/exec/obidos/ASIN/193435600X/krondonet-20>`_ — written by one of Erlang's inventors. A great introduction to the language.
+    * `Erlang Programming <http://www.amazon.com/exec/obidos/ASIN/0596518188/krondonet-20>`_ — this complements the Armstrong book and goes into more detail in several key areas.
+    * `Erlang and OTP in Action <http://www.amazon.com/exec/obidos/ASIN/1933988789/krondonet-20>`_ — this hasn't been published yet, but I am eagerly awaiting my copy. Neither of the first two books really addresses OTP, the Erlang framework for building large apps. Full disclosure: two of the authors are friends of mine.
+
+Erlang に関してはこのくらいにしておきましょう。
+":doc:`p21`" では Haskell を見ていきます。Python とも Erlang とも大いに異なる雰囲気を持つ、もうひとつの関数型言語です。
+言うまでもありませんが、いくつかの共通点を見出していくことになるでしょう。
+
+..
+    Well that's it for Erlang. In the ` <http://krondo.com/blog/?p=2814>next Part`_ we will look at Haskell, another functional language with a very different feel from either Python or Erlang. Nevertheless, we shall endeavor to find some common ground.
+
+おすすめの練習問題
+------------------
+..
+    <h3 class="lwe-editable-pre">Suggested Exercises for the Highly Motivated
+
+1. Erlang と Python クライアントを見比べてみて、似ている部分と異なる部分を見分けましょう。
+   どのようにエラー (詩のサーバに接続失敗したように) を処理しているでしょうか？
+2. 受信した詩の部分部分を出力しないように Erlang クライアントを単純化してください (タスク番号を追跡する必要もありませんね)。
+3. それぞれの詩をダウンロードする時間を計測するように Erlang クライアントを修正してください。
+4. コマンドラインで与えられた順番と同じ順番で詩を出力するように Erlang クライアントを修正してください。
+5. 詩のサーバに接続できないときに、もっと可読性の高いエラーメッセージを表示するよう Erlang クライアントを修正してください。
+6. Twisted を使って実装した詩のサーバの Erlang バージョンを記述してください。
+
+..
+    * Go through the Erlang and Python clients and identify where they are similar and where they differ. How do they each handle errors (like a failure to connect to a poetry server)?
+    * Simplify the Erlang client so it no longer prints out each bit of poetry that comes in (so you don't need to keep track of task numbers either).
+    * Modify the Erlang client to measure the time it takes to download each poem.
+    * Modify the Erlang client to print out the poems in the same order as they were given on the command line.
+    * Modify the Erlang client to print out a more readable error message when we can't connect to a poetry server.
+    * Write Erlang versions of the poetry servers we made with Twisted.

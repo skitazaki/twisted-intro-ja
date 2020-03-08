@@ -1,0 +1,587 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート16: Twisted をデーモン化する &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート17: 「コールバック」ではない方法" href="p17.html" />
+    <link rel="prev" title="パート15: テストされた詩" href="p15.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート16: Twisted をデーモン化する</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p15.html">パート15: テストされた詩</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p17.html">パート17: 「コールバック」ではない方法</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="twisted">
+<h1>パート16: Twisted をデーモン化する<a class="headerlink" href="#twisted" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id1">
+<h2>はじめに<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>これまで私たちが記述してきたサーバは、 <code class="docutils literal notranslate"><span class="pre">print</span></code> 文で画面に出力し、ターミナルウィンドウ内で動くだけでした。
+開発版ではこれでも構いませんが、製品版としてサービスを配備することからは程遠い方法です。
+お行儀の良いサーバ製品は次のようにあるできでしょう。</p>
+<ol class="arabic simple">
+<li><p>ターミナルやユーザセッションと関連付くことなく、 <a class="reference external" href="http://en.wikipedia.org/wiki/Daemon_%28computer_software%29">daemon</a> プロセスとして動きます。
+管理者がログアウトしただけでサービスを終了させたくはないでしょうね。</p></li>
+<li><p>デバッグとエラー出力をローテートするログファイル一式か <a class="reference external" href="http://en.wikipedia.org/wiki/Syslog">syslog</a> に送ります。</p></li>
+<li><p>余分な権限をそぎ落とします。たとえば、実行前に権限の低いユーザに切り替えるなどです。</p></li>
+<li><p>管理者が簡単にデーモンへ <a class="reference external" href="http://en.wikipedia.org/wiki/Kill%28%29">シグナルを送信</a> できるように、
+ファイルに <a class="reference external" href="http://en.wikipedia.org/wiki/Process_ID">pid</a> を記録します。</p></li>
+</ol>
+<p>Twisted が提供する <cite>twistd</cite> スクリプトを使うと、これら全ての機能を手に入れることができます。
+しかしまずは、私たちのコードに手を加える必要があります。</p>
+</div>
+<div class="section" id="id3">
+<h2>コンセプト<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p><cite>twistd</cite> を理解するには、Twisted におけるいくつかのコンセプトを学習する必要があります。
+もっとも大事なのは <code class="docutils literal notranslate"><span class="pre">Service</span></code> です。
+これまでと同じように、新しいコンセプトには新しい <code class="docutils literal notranslate"><span class="pre">Interface</span></code> がつきものです。</p>
+<div class="section" id="iservice">
+<h3>IService<a class="headerlink" href="#iservice" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L87">IService</a> インターフェイスは開始と停止が可能な名前付きのサービスを定義します。
+サービスとは何をするものなのでしょう？
+何でも良いのです。
+サービスの特定の関数を定義するのではなく、インターフェイスは汎用的な属性とメソッドの一式を提供する何かを要求するだけです。</p>
+<p>ふたつの必須属性があります。 <code class="docutils literal notranslate"><span class="pre">name</span></code> と <code class="docutils literal notranslate"><span class="pre">running</span></code> です。
+<code class="docutils literal notranslate"><span class="pre">name</span></code> 属性は、 “<cite>fastpoetry</cite>” のような、単なる文字列です。
+<code class="docutils literal notranslate"><span class="pre">running</span></code> 属性は真偽値で、サービスが問題なく開始したときは <code class="docutils literal notranslate"><span class="pre">True</span></code> になります。</p>
+<p><code class="docutils literal notranslate"><span class="pre">IService</span></code> のいくつかのメソッドに触れてみましょう。
+明らかなものはスキップするとして、より上級者向けや簡単な Twisted プログラムではあまり使われないものを見てみましょう。
+<code class="docutils literal notranslate"><span class="pre">IService</span></code> の根幹を成すふたつのメソッドは <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L130">startService</a> と
+<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L135">stopService</a> です。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">startService</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Start the service.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<span class="k">def</span> <span class="nf">stopService</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Stop the service.</span>
+
+<span class="sd">    @rtype: L{Deferred}</span>
+<span class="sd">    @return: a L{Deferred} which is triggered when the service has</span>
+<span class="sd">        finished shutting down. If shutting down is immediate, a</span>
+<span class="sd">        value can be returned (usually, C{None}).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+</pre></div>
+</div>
+<p>さて、これらのメソッドの実際の動作は、対象となるサービスに依存するでしょう。
+たとえば、 <code class="docutils literal notranslate"><span class="pre">startService</span></code> メソッドは次のことを行うかもしれません。</p>
+<ul class="simple">
+<li><p>設定情報を読み込みます。もしくは、</p></li>
+<li><p>データベースを初期化します。もしくは、</p></li>
+<li><p>ポートを待ち受け始めます。もしくは、</p></li>
+<li><p>まったく何もしません。</p></li>
+</ul>
+<p>そして <code class="docutils literal notranslate"><span class="pre">stopService</span></code> には次の可能性があります。</p>
+<ul class="simple">
+<li><p>データを永続化します。もしくは、</p></li>
+<li><p>有効なデータベース接続を閉じます。もしくは、</p></li>
+<li><p>ポートで待ち受けるのを止めます。もしくは、</p></li>
+<li><p>まったく何もしません。</p></li>
+</ul>
+<p>カスタムサービスを記述するときは、これらのメソッドを正確に実装する必要があります。
+しかし、ポートを待ち受けるようないくつかの共通する振る舞いには、私たちが利用できるサービスを Twisted が提供してくれます。</p>
+<p><code class="docutils literal notranslate"><span class="pre">stopService</span></code> は遅延オブジェクトを返すかもしれないことに気をつけてください。
+これは、サービスが完全に停止したら発火するために必要とされます。
+これにより、アプリケーション全体が停止する前に、サービス停止後に自分自身のクリーンナップが終了できるようにします。
+サービスがすぐさまに停止するなら、遅延オブジェクトの替わりに単に <code class="docutils literal notranslate"><span class="pre">None</span></code> を返せば良いでしょう。</p>
+<p>サービスは、一緒に開始および終了されるような集合として構成されます。
+ここで見ておく最後の <code class="docutils literal notranslate"><span class="pre">IService</span></code> メソッドは <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L107">setServiceParent</a> で、
+これはサービスを集合に追加します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">setServiceParent</span><span class="p">(</span><span class="n">parent</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Set the parent of the service.</span>
+
+<span class="sd">    @type parent: L{IServiceCollection}</span>
+<span class="sd">    @raise RuntimeError: Raised if the service already has a parent</span>
+<span class="sd">        or if the service has a name and the parent already has a child</span>
+<span class="sd">        by that name.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+</pre></div>
+</div>
+<p>いかなるサービスも親を持つことができます。
+これはサービスが階層構造を持って構成されることを意味します。
+そして、次に見ていく <cite>Interface</cite> をもたらします。</p>
+</div>
+<div class="section" id="iservicecollection">
+<h3>IServiceCollection<a class="headerlink" href="#iservicecollection" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L203">IServiceCollection</a>
+インターフェイスは <code class="docutils literal notranslate"><span class="pre">IService</span></code> オブジェクトを包含可能なオブジェクトを定義します。
+サービスの集合は、以下のメソッドを持つ単なるコンテナクラスなのです。</p>
+<ul class="simple">
+<li><p>名前からサービスを探し出します。 (<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L212">getServiceNamed</a>)</p></li>
+<li><p>集合に含まれるサービスに対して繰り返します。 (<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L222">__iter__</a>)</p></li>
+<li><p>集合にサービスを追加します。 (<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L227">addService</a>)</p></li>
+<li><p>集合からサービスを取り除きます。 (<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L236">removeService</a>)</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">IServiceCollection</span></code> の実装が自動的に <code class="docutils literal notranslate"><span class="pre">IService</span></code> の実装であるわけではないことに気をつけましょう。
+しかし、あるクラスが両方のインターフェイスを実装できない理由はありません (少し先で例を見ていきましょう) 。</p>
+</div>
+<div class="section" id="application">
+<h3>Application<a class="headerlink" href="#application" title="Permalink to this headline">¶</a></h3>
+<p>Twisted の <code class="docutils literal notranslate"><span class="pre">Application</span></code> は分離されたインターフェイスとして実装されているわけではありません。
+むしろ <code class="docutils literal notranslate"><span class="pre">Application</span></code> オブジェクトは、ここで取り扱う範囲外のほかのいくつかのインターフェイスと同様に、
+<code class="docutils literal notranslate"><span class="pre">IService</span></code> と <code class="docutils literal notranslate"><span class="pre">IServiceCollection</span></code> の両方を実装するために必要とされます。</p>
+<p><code class="docutils literal notranslate"><span class="pre">Application</span></code> は、Twisted アプリケーション全体を表現するトップレベルのサービスです。
+デーモンにおける全てのサービスは <code class="docutils literal notranslate"><span class="pre">Application</span></code> オブジェクトの子供 (もしくは孫や子孫) になるでしょう。</p>
+<p>自分自身で <code class="docutils literal notranslate"><span class="pre">Application</span></code> を実際に実装することは稀です。
+私たちが使うような実装を Twisted が提供してくれます。</p>
+</div>
+<div class="section" id="twisted-logging">
+<h3>Twisted Logging<a class="headerlink" href="#twisted-logging" title="Permalink to this headline">¶</a></h3>
+<p>Twisted は <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/python/log.py">twisted.python.log</a>
+モジュールに独自のロギング方法を持ちます。
+ログを書き込む基本的な API は簡単ですので、 <cite>basic-twisted/log.py</cite> にある簡単な例を見せるだけにしましょう。
+興味を持ったら Twisted のモジュールをよく読んでみてください。</p>
+<p>わざわざロギングのハンドラをインストールするための API を示すことはしません。
+<cite>twistd</cite> がやってくれるからです。</p>
+</div>
+</div>
+<div class="section" id="fastpoetry-2-0">
+<h2>FastPoetry 2.0<a class="headerlink" href="#fastpoetry-2-0" title="Permalink to this headline">¶</a></h2>
+<p>それではコードを見ていきましょう。
+早い詩のサーバを <cite>twistd</cite> で動かすように更新しました。
+ソースコードは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L1">twisted-server-3/fastpoetry.py</a> にあります。
+まずは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L9">poetry protocol</a> があります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryProtocol</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">connectionMade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">poem</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">service</span><span class="o">.</span><span class="n">poem</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">msg</span><span class="p">(</span><span class="s1">&#39;sending </span><span class="si">%d</span><span class="s1"> bytes of poetry to </span><span class="si">%s</span><span class="s1">&#39;</span>
+                <span class="o">%</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">poem</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">getPeer</span><span class="p">()))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">loseConnection</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>それぞれの新しい接続を記録するために <code class="docutils literal notranslate"><span class="pre">print</span></code> 文ではなく <code class="docutils literal notranslate"><span class="pre">twisted.python.log.msg</span></code> 関数を使っていることに注意してください。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L19">factory クラス</a> は次のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryFactory</span><span class="p">(</span><span class="n">ServerFactory</span><span class="p">):</span>
+
+    <span class="n">protocol</span> <span class="o">=</span> <span class="n">PoetryProtocol</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">service</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">service</span> <span class="o">=</span> <span class="n">service</span>
+</pre></div>
+</div>
+<p>お分かりのように、詩はもはやファクトリに保存されず、ファクトリから参照されるサービスオブジェクトに保存されます。
+プロトコルが、ファクトリ経由でサービスから詩を取得する方法に注意してください。
+最後に、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L27">サービスクラス自身</a> を見てみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryService</span><span class="p">(</span><span class="n">service</span><span class="o">.</span><span class="n">Service</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poetry_file</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">poetry_file</span> <span class="o">=</span> <span class="n">poetry_file</span>
+
+    <span class="k">def</span> <span class="nf">startService</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">service</span><span class="o">.</span><span class="n">Service</span><span class="o">.</span><span class="n">startService</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">poem</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">poetry_file</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">msg</span><span class="p">(</span><span class="s1">&#39;loaded a poem from: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">poetry_file</span><span class="p">,))</span>
+</pre></div>
+</div>
+<p>他の多くの <code class="docutils literal notranslate"><span class="pre">Interface</span></code> クラスのように、Twisted は私たちが独自実装を作るために使える基底クラスを提供します。これは役に立つデフォルトの振る舞いを持ちます。
+ここでは <code class="docutils literal notranslate"><span class="pre">PoetryService</span></code> を実装するために <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L154">twisted.application.service.Service</a> クラスを使います。</p>
+<p>基底クラスはすべての必須メソッドにおいてデフォルト実装を提供しますので、独自の振る舞いだけを実装すれば構いません。
+ここでは詩のファイルを読み込むために <code class="docutils literal notranslate"><span class="pre">startService</span></code> を上書き (<cite>override</cite>) するだけです。
+とはいえ基底クラスのメソッド (<code class="docutils literal notranslate"><span class="pre">running</span></code> 属性を設定してくれます) を呼び出していることに注意してください。</p>
+<p>言及しておく価値のあることがもう一点あります。
+<code class="docutils literal notranslate"><span class="pre">PoetryService</span></code> オブジェクトは <code class="docutils literal notranslate"><span class="pre">PoetryProtocol</span></code> の詳細について何も知りません。
+サービスがすべきことは、詩を読み込んでそれを必要とするすべてのオブジェクトにアクセス手段を提供するだけです。
+言い換えると <code class="docutils literal notranslate"><span class="pre">PoetryService</span></code> は、TCP 接続を介して詩を送信するような低レベルの詳しいことよりは、詩を提供するための高レベルの詳しいことに関心があるのです。
+このため、たとえば UDP や XML-RPC のような他のプロトコルでも同じサービスを利用できます。
+私たちの単純なサービスでは小さなことですが、もっと現実的なサービスの実装ではアドバンテージを想像できるでしょう。</p>
+<p>これが典型的な Twisted プログラムだったとすれば、これまで見てきた全てのコードは実際にはこのファイルには存在しません。
+むしろ他のモジュール (<code class="docutils literal notranslate"><span class="pre">fastpoetry.protocol</span></code> や <code class="docutils literal notranslate"><span class="pre">fastpoetry.service</span></code>) にあるべきでしょう。
+しかし、例が自己包括になるように作ってきた方法に従い、単一のスクリプトにすべてを含めるようにしてきました。</p>
+<div class="section" id="twisted-tac">
+<h3>Twisted <cite>tac</cite> ファイル<a class="headerlink" href="#twisted-tac" title="Permalink to this headline">¶</a></h3>
+<p>スクリプトの残りの部分は通常はコンテンツ全体を含んでいます。 Twisted の <cite>tac</cite> ファイルです。
+<cite>tac</cite> ファイルは <code class="docutils literal notranslate"><span class="pre">twistd</span></code> にアプリケーション構築方法を伝えるための Twisted アプリケーションの設定ファイルです。
+設定ファイルですので、設定を選択すること (ポート番号や詩のファイル置き場など) は特定の方法でアプリケーションを実行することに責任を持ちます。
+言い換えると、 <cite>tac</cite> ファイルは、いかなる詩のサーバでも起動できるような汎用的なスクリプトというよりは、
+サービスにおける特定の配備を表現します (“あの”詩を”この”ポートで提供する)。</p>
+<p>複数の詩のサーバを同じホスト上で実行するなら、それぞれに対して <cite>tac</cite> ファイルを用意することになります
+(<cite>tac</cite> ファイルが汎用的な目的のコードを含まない理由を理解して頂けるでしょうか)。
+私たちの例では、 <cite>tac</cite> ファイルは <code class="docutils literal notranslate"><span class="pre">poetry/ecstasy.txt</span></code> をループバックインターフェイスの <cite>10000</cite> 番ポートで提供するように設定されています。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># configuration parameters</span>
+<span class="n">port</span> <span class="o">=</span> <span class="mi">10000</span>
+<span class="n">iface</span> <span class="o">=</span> <span class="s1">&#39;localhost&#39;</span>
+<span class="n">poetry_file</span> <span class="o">=</span> <span class="s1">&#39;poetry/ecstasy.txt&#39;</span>
+</pre></div>
+</div>
+<p><cite>twistd</cite> はこれらの特定の変数に関して何も知らない、ということに注意しましょう。
+設定値を一ヶ所にまとめておくために定義しているだけです。
+実際には、ちょっと先で見ていくように、 <cite>twistd</cite> はファイル全体でひとつの変数を管理しているだけです。
+次に、アプリケーションを構築していくことを <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L44">始めましょう</a> 。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># this will hold the services that combine to form the poetry server</span>
+<span class="n">top_service</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">MultiService</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>私たちの詩のサーバはふたつのサービスから構成されます。上で定義した <code class="docutils literal notranslate"><span class="pre">PoetryService</span></code> と、詩を送り出すために待ち受けるソケットを生成する Twisted 組み込みのサービスです。
+これらふたつのサービスはお互いにはっきりと関連付いていますので、 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L253">MultiService</a> を使ってグループ化しておきましょう。
+<code class="docutils literal notranslate"><span class="pre">MultiService</span></code> は <code class="docutils literal notranslate"><span class="pre">IService</span></code> と <code class="docutils literal notranslate"><span class="pre">IServiceCollection</span></code> の両方を実装しているTwisted のクラスです。</p>
+<p>サービスの集合ですから <code class="docutils literal notranslate"><span class="pre">MultiService</span></code> はふたつの詩のサービスをグループ化してくれます。
+サービスでもありますので、 <code class="docutils literal notranslate"><span class="pre">MultiService</span></code> 自身が開始されると子供となるサーバの起動もやってくれますし、停止するときはそれらも停止させます。
+ひとつ目の詩のサービスを集合に <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L48">追加</a> してみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># the poetry service holds the poem. it will load the poem when it is</span>
+<span class="c1"># started</span>
+<span class="n">poetry_service</span> <span class="o">=</span> <span class="n">PoetryService</span><span class="p">(</span><span class="n">poetry_file</span><span class="p">)</span>
+<span class="n">poetry_service</span><span class="o">.</span><span class="n">setServiceParent</span><span class="p">(</span><span class="n">top_service</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>これは非常に簡単なことです。
+<code class="docutils literal notranslate"><span class="pre">PoetryService</span></code> を作成して、 <code class="docutils literal notranslate"><span class="pre">setServiceParent</span></code> で集合に追加するだけです。
+このメソッドは Twisted の基底クラスから継承しています。
+次は TCP リスナーを <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L53">加えましょう</a> 。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># the tcp service connects the factory to a listening socket. it will</span>
+<span class="c1"># create the listening socket when it is started</span>
+<span class="n">factory</span> <span class="o">=</span> <span class="n">PoetryFactory</span><span class="p">(</span><span class="n">poetry_service</span><span class="p">)</span>
+<span class="n">tcp_service</span> <span class="o">=</span> <span class="n">internet</span><span class="o">.</span><span class="n">TCPServer</span><span class="p">(</span><span class="n">port</span><span class="p">,</span> <span class="n">factory</span><span class="p">,</span> <span class="n">interface</span><span class="o">=</span><span class="n">iface</span><span class="p">)</span>
+<span class="n">tcp_service</span><span class="o">.</span><span class="n">setServiceParent</span><span class="p">(</span><span class="n">top_service</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Twisted は、特定のファクトリ (今の場合は <code class="docutils literal notranslate"><span class="pre">PoetryFactory</span></code>) に接続して TCP を待ち受けるソケットを生成するために、 <code class="docutils literal notranslate"><span class="pre">TCPServer</span></code> サービスを提供します。
+<cite>tac</cite> ファイルの仕事でアプリケーションは開始できる状態 (実際に開始はしませんが) になりますので、 <code class="docutils literal notranslate"><span class="pre">reactor.listenTCP</span></code> を直接呼び出すことはしません。
+<cite>twistd</cite> によって開始されると <code class="docutils literal notranslate"><span class="pre">TCPServer</span></code> はソケットを生成するでしょう。</p>
+<p>ここまでで、サービスに名前を付けていないことに気付いたかもしれません。
+サービスに名前を付けることは必須事項ではなく、実行時に探し出したい (“look up”) ならそうするべき、というオプション機能です。
+今の小さなアプリケーションではその必要はありませんので、ここでは取り上げません。</p>
+<p>ようやくふたつのサービスを集合にまとめることができましたね。
+<code class="docutils literal notranslate"><span class="pre">Application</span></code> を作って集合に <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L58">追加します</a> 。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># this variable has to be named &#39;application&#39;</span>
+<span class="n">application</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">Application</span><span class="p">(</span><span class="s2">&quot;fastpoetry&quot;</span><span class="p">)</span>
+
+<span class="c1"># this hooks the collection we made to the application</span>
+<span class="n">top_service</span><span class="o">.</span><span class="n">setServiceParent</span><span class="p">(</span><span class="n">application</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>このスクリプト内で <cite>twistd</cite> が本当に注意する唯一の変数は <code class="docutils literal notranslate"><span class="pre">application</span></code> だけです。
+<cite>twistd</cite> は開始されるべきであるアプリケーションを見つけるでしょう (変数は “<code class="docutils literal notranslate"><span class="pre">application</span></code>” という名前でなくてはなりません)。
+アプリケーションが開始されると、追加しておいた全てのサービスも同様に開始されるでしょう。</p>
+<p>図34で、ここまでで作ったアプリケーションの構造を示します。</p>
+<div class="figure align-default" id="id19">
+<span id="figure34"></span><img alt="_images/p16_application.png" src="_images/p16_application.png" />
+<p class="caption"><span class="caption-text">図34： fastpoetry アプリケーションの構造</span><a class="headerlink" href="#id19" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<div class="section" id="id11">
+<h3>サーバを動かす<a class="headerlink" href="#id11" title="Permalink to this headline">¶</a></h3>
+<p>新しいサーバを動かしてみましょう。
+<cite>tac</cite> ファイルを参照し、 <cite>twistd</cite> を使って開始させます。
+もちろん、これも普通の Python ファイルです。
+まずは Python を使って実行して何が起こるかを見てみます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">3</span><span class="o">/</span><span class="n">fastpoetry</span><span class="o">.</span><span class="n">py</span>
+</pre></div>
+</div>
+<p>やってみると、何も起こらないことがわかるでしょう！
+先ほど書いたように、 <cite>tac</cite> ファイルの仕事はアプリケーションを実行可能な状態にすることで、実際に実行はしません。
+こうした <cite>tac</cite> ファイルの特別な目的を覚えておくために、拡張子に <cite>.py</cite> ではなく <cite>.tac</cite> を使う人もいます。
+しかし <cite>twistd</cite> スクリプトは拡張子に関して気にしません。</p>
+<p>それでは <cite>twistd</cite> を使って実際にサーバを動かしてみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">twistd</span> <span class="o">--</span><span class="n">nodaemon</span> <span class="o">--</span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">3</span><span class="o">/</span><span class="n">fastpoetry</span><span class="o">.</span><span class="n">py</span>
+</pre></div>
+</div>
+<p>このコマンドを実行すると、次のような出力を得られるでしょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">23</span> <span class="mi">20</span><span class="p">:</span><span class="mi">57</span><span class="p">:</span><span class="mi">14</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">Log</span> <span class="n">opened</span><span class="o">.</span>
+<span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">23</span> <span class="mi">20</span><span class="p">:</span><span class="mi">57</span><span class="p">:</span><span class="mi">14</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">twistd</span> <span class="mf">10.0</span><span class="o">.</span><span class="mi">0</span> <span class="p">(</span><span class="o">/</span><span class="n">usr</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">python</span> <span class="mf">2.6</span><span class="o">.</span><span class="mi">5</span><span class="p">)</span> <span class="n">starting</span> <span class="n">up</span><span class="o">.</span>
+<span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">23</span> <span class="mi">20</span><span class="p">:</span><span class="mi">57</span><span class="p">:</span><span class="mi">14</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">reactor</span> <span class="n">class</span><span class="p">:</span> <span class="n">twisted</span><span class="o">.</span><span class="n">internet</span><span class="o">.</span><span class="n">selectreactor</span><span class="o">.</span><span class="n">SelectReactor</span><span class="o">.</span>
+<span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">23</span> <span class="mi">20</span><span class="p">:</span><span class="mi">57</span><span class="p">:</span><span class="mi">14</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">__builtin__</span><span class="o">.</span><span class="n">PoetryFactory</span> <span class="n">starting</span> <span class="n">on</span> <span class="mi">10000</span>
+<span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">23</span> <span class="mi">20</span><span class="p">:</span><span class="mi">57</span><span class="p">:</span><span class="mi">14</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">Starting</span> <span class="n">factory</span> <span class="o">&amp;</span><span class="n">lt</span><span class="p">;</span><span class="n">__builtin__</span><span class="o">.</span><span class="n">PoetryFactory</span> <span class="n">instance</span> <span class="n">at</span> <span class="mh">0x14ae8c0</span><span class="o">&amp;</span><span class="n">gt</span><span class="p">;</span>
+<span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">23</span> <span class="mi">20</span><span class="p">:</span><span class="mi">57</span><span class="p">:</span><span class="mi">14</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">loaded</span> <span class="n">a</span> <span class="n">poem</span> <span class="n">from</span><span class="p">:</span> <span class="n">poetry</span><span class="o">/</span><span class="n">ecstasy</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>いくつか気にかけておくことがあります。</p>
+<ul class="simple">
+<li><p>Twisted のロギングシステムからの出力が見えます。 <code class="docutils literal notranslate"><span class="pre">PoetryFactory</span></code> が <code class="docutils literal notranslate"><span class="pre">log.msg</span></code> を呼び出すことも含みます。
+<cite>tac</cite> ファイルでロガーをインストールしていませんので、 <cite>twistd</cite> がインストールしてくれました。</p></li>
+<li><p>ふたつのメインサービスもあり、 <code class="docutils literal notranslate"><span class="pre">PoetryService</span></code> と <code class="docutils literal notranslate"><span class="pre">TCPServer</span></code> が起動しています。</p></li>
+<li><p>シェルプロンプトは決して制御を戻しません。
+サーバがデーモンとして動作していないことを意味します。
+デフォルトでは、 <cite>twistd</cite> はデーモンプロセスとしてサーバを実行します (それこそが <cite>twistd</cite> の主要な存在理由ですから) が、
+<code class="docutils literal notranslate"><span class="pre">--nodaemon</span></code> オプションを付けると <cite>twistd</cite> はサーバを通常のシェルプロセスとして実行し、標準出力にログを出力します。
+この挙動は <cite>tac</cite> ファイルをデバッグするときに便利です。</p></li>
+</ul>
+<p>それでは詩を取得してサーバをテストしてみましょう。
+これまでに作ってきた詩のクライアントでも、単に <code class="docutils literal notranslate"><span class="pre">netcat</span></code> を使っても構いません。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">netcat</span> <span class="n">localhost</span> <span class="mi">10000</span>
+</pre></div>
+</div>
+<p>サーバから取得して、次のような新しいログが出力されるでしょうか。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">27</span> <span class="mi">22</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">39</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="n">__builtin__</span><span class="o">.</span><span class="n">PoetryFactory</span><span class="p">]</span> <span class="n">sending</span> <span class="mi">3003</span> <span class="nb">bytes</span> <span class="n">of</span> <span class="n">poetry</span> <span class="n">to</span> <span class="n">IPv4Address</span><span class="p">(</span><span class="n">TCP</span><span class="p">,</span> <span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="mi">58208</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>これは <code class="docutils literal notranslate"><span class="pre">PoetryProtocol.connectionMade</span></code> の <code class="docutils literal notranslate"><span class="pre">log.msg</span></code> の呼び出しによるものです。
+サーバにもっとリクエストを発行してみると、それぞれのリクエストごとにログが出力されます。</p>
+<p>ではここで <code class="docutils literal notranslate"><span class="pre">Ctrl+C</span></code> を押してサーバを停止させましょう。
+次のような出力があるはずです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">^</span><span class="n">C2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">29</span> <span class="mi">21</span><span class="p">:</span><span class="mi">32</span><span class="p">:</span><span class="mi">59</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">Received</span> <span class="n">SIGINT</span><span class="p">,</span> <span class="n">shutting</span> <span class="n">down</span><span class="o">.</span>
+<span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">29</span> <span class="mi">21</span><span class="p">:</span><span class="mi">32</span><span class="p">:</span><span class="mi">59</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="p">(</span><span class="n">Port</span> <span class="mi">10000</span> <span class="n">Closed</span><span class="p">)</span>
+<span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">29</span> <span class="mi">21</span><span class="p">:</span><span class="mi">32</span><span class="p">:</span><span class="mi">59</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">Stopping</span> <span class="n">factory</span> <span class="o">&lt;</span><span class="n">__builtin__</span><span class="o">.</span><span class="n">PoetryFactory</span> <span class="n">instance</span> <span class="n">at</span> <span class="mh">0x28d38c0</span><span class="o">&gt;</span>
+<span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">29</span> <span class="mi">21</span><span class="p">:</span><span class="mi">32</span><span class="p">:</span><span class="mi">59</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">Main</span> <span class="n">loop</span> <span class="n">terminated</span><span class="o">.</span>
+<span class="mi">2010</span><span class="o">-</span><span class="mi">06</span><span class="o">-</span><span class="mi">29</span> <span class="mi">21</span><span class="p">:</span><span class="mi">32</span><span class="p">:</span><span class="mi">59</span><span class="o">-</span><span class="mi">0700</span> <span class="p">[</span><span class="o">-</span><span class="p">]</span> <span class="n">Server</span> <span class="n">Shut</span> <span class="n">Down</span><span class="o">.</span>
+</pre></div>
+</div>
+<p>お分かりのように、Twisted はクラッシュしません。
+きれいに自分自身を停止させ、ログメッセージでそれに関して教えてくれます。
+ふたつのメインサービスも同じように停止しています。</p>
+<p>もう一度サーバを起動させましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">twistd</span> <span class="o">--</span><span class="n">nodaemon</span> <span class="o">--</span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">3</span><span class="o">/</span><span class="n">fastpoetry</span><span class="o">.</span><span class="n">py</span>
+</pre></div>
+</div>
+<p>シェルをもう一つ開いて <cite>twisted-intro</cite> ディレクトリに移動してください。
+ディレクトリ一覧に <cite>twistd.pid</cite> ファイルがあるはずです。
+このファイルは <cite>twistd</cite> によって作成され、起動中のサーバのプロセス ID が保存されています。
+サーバを停止させるために次のコマンドを実行してみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>kill `cat twistd.pid`
+</pre></div>
+</div>
+<p>サーバを停止するときに、 <cite>twistd</cite> がプロセス ID のファイルを削除してくれます。</p>
+</div>
+<div class="section" id="id12">
+<h3>現実のデーモン<a class="headerlink" href="#id12" title="Permalink to this headline">¶</a></h3>
+<p>サーバを実際のデーモンプロセスとして実行させましょう。
+<cite>twistd</cite> のデフォルトの振る舞いですので、むしろ簡単です。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">twistd</span> <span class="o">--</span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">3</span><span class="o">/</span><span class="n">fastpoetry</span><span class="o">.</span><span class="n">py</span>
+</pre></div>
+</div>
+<p>今回はシェルのプロンプトはすぐさま処理を返してきましたね。
+ディレクトリの一覧を表示させてみると、実行させているサーバの <cite>twistd.pid</cite> ファイルに加えて、
+先ほどまではシェルプロンプトに表示されていたログが書き込まれる <cite>twistd.log</cite> ファイルもあるはずです。</p>
+<p>デーモンプロセスを開始させると、 <cite>twistd</cite> は標準出力ではなくログファイルに書く込むログハンドラーをインストールします。
+デフォルトのログファイルは <cite>twistd.log</cite> で、 <cite>twistd</cite> を実行させた場所と同じディレクトリです。
+しかし、必要なら <code class="docutils literal notranslate"><span class="pre">--logfile</span></code> オプションを使って変更することもできます。
+<cite>twistd</cite> がインストールするハンドラーはログファイルのサイズが 1MB を超過する度にログローテートもやってくれます。</p>
+<p>システム上の全てのプロセスを一覧表示することで、実行中のサーバを見えるようにしておくべきでしょう。
+もうひとつの詩を取得することでサーバをテストしてみましょう。
+リクエストしたそれぞれの詩に対してログファイルに新しいエントリが追加されますよね。</p>
+<p>サーバはもはやシェルに繋がっていません (<a class="reference external" href="http://en.wikipedia.org/wiki/Init">init</a> を除くいかなるものともです) ので、
+<code class="docutils literal notranslate"><span class="pre">Ctrl-C</span></code> では停止させることができません。
+きちんとしたデーモンプロセスですので、あなたがログアウトしても動き続けてくれるでしょう。
+しかし、 <cite>twistd.pid</cite> ファイルを使ってプロセスを停止させることはできます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>kill `cat twistd.pid`
+</pre></div>
+</div>
+<p>ログに停止メッセージが書き込まれると、 <cite>twistd.pid</cite> ファイルが削除され、サーバが止まります。やりましたね。</p>
+<p><cite>twistd</cite> のその他の起動オプションを確認しておくのは良い考えですね。
+たとえば、デーモンを実行させる前に異なるユーザーやグループのアカウントに切り替わるよう <cite>twistd</cite> に伝えることがあります
+(典型的には、セキュリティ警告により、サーバが必要としない権限をそぎ落とすことがあります)。
+他のオプションを見ていくのは退屈なので、  <cite>twistd</cite> に <code class="docutils literal notranslate"><span class="pre">--help</span></code> オプションを渡して確認しておいてください。</p>
+</div>
+</div>
+<div class="section" id="id13">
+<h2>Twisted のプラグイン機構<a class="headerlink" href="#id13" title="Permalink to this headline">¶</a></h2>
+<p>よし、それではサーバをまっとうなデーモンプロセスとして起動するために <cite>twistd</cite> を使いましょう。
+すべてがよくできており、設定ファイルが本当に Python のソースファイルであるということで、設定には非常な柔軟さがあります。
+とはいえ、いつも多大なる柔軟性が必要なわけでもありません。
+私たちの詩のサーバにとっては、注意すべきは 2, 3 のオプションだけでしょう。</p>
+<ul class="simple">
+<li><p>提供する詩</p></li>
+<li><p>提供するためのポート番号</p></li>
+<li><p>待ち受けるインターフェイス</p></li>
+</ul>
+<p>これらの値ごとに簡単なバリエーションの新しい <cite>tac</cite> ファイルを作るのは、ちょっとやりすぎ感があります。
+<cite>twistd</cite> のコマンドラインにオプションとして指定できると良さそうですね。
+これは Twisted のプラグインシステムで実現できます。</p>
+<p>Twisted のプラグインは名前を付けられた Application を定義する方法を提供してくれます。
+<cite>twistd</cite> が動的に発見して実行できるようなコマンドラインオプションのセットも一緒です。
+Twisted 自体にも組み込みプラグインのセットがあります。
+<cite>twistd</cite> に引数を何もつけずに実行すると見ることができます。
+<cite>twisted-intro</cite> ディレクトリの外で、とりあえずやってみましょう。
+ヘルプ部分の後ろに、次のような出力が見えますよね。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">...</span>
+<span class="n">ftp</span>                <span class="n">An</span> <span class="n">FTP</span> <span class="n">server</span><span class="o">.</span>
+<span class="n">telnet</span>             <span class="n">A</span> <span class="n">simple</span><span class="p">,</span> <span class="n">telnet</span><span class="o">-</span><span class="n">based</span> <span class="n">remote</span> <span class="n">debugging</span> <span class="n">service</span><span class="o">.</span>
+<span class="n">socks</span>              <span class="n">A</span> <span class="n">SOCKSv4</span> <span class="n">proxy</span> <span class="n">service</span><span class="o">.</span>
+<span class="o">...</span>
+</pre></div>
+</div>
+<p>それぞれの行は Twisted の組み込みプラグイン を表します。
+<cite>twistd</cite> を使ってどれでも起動できます。
+それぞれのプラグインは独自のオプションを持ち、 <code class="docutils literal notranslate"><span class="pre">--help</span></code> を使うと見つけられます。
+<cite>ftp</cite> プラグインのオプションを見てみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">twistd</span> <span class="n">ftp</span> <span class="o">--</span><span class="n">help</span>
+</pre></div>
+</div>
+<p><cite>twistd</cite> 自身ではなく <cite>ftp</cite> プラグインのオプションですので、
+<cite>ftp</cite> コマンドの後に <code class="docutils literal notranslate"><span class="pre">--help</span></code> オプションを配置していることに気をつけてください。
+詩のサーバを動かしたように、 <cite>twistd</cite> を使って <cite>ftp</cite> サーバを動かすことができます。
+プラグインですから名前を指定するだけで動かせます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">twistd</span> <span class="o">--</span><span class="n">nodaemon</span> <span class="n">ftp</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10001</span>
+</pre></div>
+</div>
+<p>このコマンドは <cite>ftp</cite> プラグインをデーモンではないモードで 10001 番ポートで動かします。
+プラグイン特有のオプションである <code class="docutils literal notranslate"><span class="pre">port</span></code> はプラグイン名の後ですが、 <cite>twistd</cite> の <code class="docutils literal notranslate"><span class="pre">nodaemon</span></code> オプションはプラグイン名の前であることに気をつけてください。
+詩のサーバでもやってみたように、 <code class="docutils literal notranslate"><span class="pre">Ctrl-C</span></code> でプラグインを停止できます。</p>
+<p>それでは、私たちの詩のサーバを Twisted プラグイン化してみましょう。
+まずは 2, 3 の新しいコンセプトを紹介します。</p>
+<div class="section" id="iplugin">
+<h3>IPlugin<a class="headerlink" href="#iplugin" title="Permalink to this headline">¶</a></h3>
+<p>あらゆる Twisted プラグインは <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/plugin.py#L38">twisted.plugin.IPlugin</a>
+インターフェイスを実装しなくてはなりません。
+<code class="docutils literal notranslate"><span class="pre">Interface</span></code> の宣言を見てみると、実際には何のメソッドも定義していないことが分かるでしょう。
+<code class="docutils literal notranslate"><span class="pre">IPlugin</span></code> を実装することは、 <cite>twistd</cite> が見つけられるように、 プラグインが「やぁ、自分はプラグインだよ！」と主張する簡単な方法です。
+もちろん、何かの用途で他のインターフェイスを実装しなくてはならないでしょうし、少し先でやってみます。</p>
+<p>しかし、オブジェクトが空っぽのインターフェイスを実際に実装しているかを知るにはどうしましょうか？
+<code class="docutils literal notranslate"><span class="pre">zope.interface</span></code> パッケージには、特定のクラスが特定のインターフェイスを実装していると宣言するために使う <code class="docutils literal notranslate"><span class="pre">implements</span></code> と呼ばれる関数があります。
+詩のサーバのプラグインバージョンで例を見ていきましょう。</p>
+</div>
+<div class="section" id="iservicemaker">
+<h3>IServiceMaker<a class="headerlink" href="#iservicemaker" title="Permalink to this headline">¶</a></h3>
+<p>私たちのプラグインは、 <code class="docutils literal notranslate"><span class="pre">IPlugin</span></code> に加えて <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L25">IServiceMaker</a> インターフェイスも実装します。
+<code class="docutils literal notranslate"><span class="pre">IServiceMaker</span></code> を実装しているオブジェクトはアプリケーションを実行する上で核となる <code class="docutils literal notranslate"><span class="pre">IService</span></code> の生成方法を知っています。
+<code class="docutils literal notranslate"><span class="pre">IServiceMaker</span></code> には三つの属性とひとつのメソッドを指定します。</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">tapname</span></code>: プラグインのための文字列名です。”tap” は Twisted Application Plugin を意味します。
+Note: 古いバージョンの Twisted は “tapfiles” と呼ばれるピックル化されたアプリケーションファイルも使っていました。しかし、この機能は廃止されました。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">description</span></code>: プラグインの説明です。ヘルプテキストの一部として <cite>twistd</cite> が表示します。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">options</span></code>: このプラグインが受け付けるコマンドラインオプションを説明するオブジェクトです。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">makeService</span></code>: 新しい <code class="docutils literal notranslate"><span class="pre">IService</span></code> オブジェクトを生成するメソッドです。メソッドには特定のコマンドラインオプションのセットが与えられます。</p></li>
+</ul>
+<p>次のバージョンの詩のサーバで、これらをまとめる方法をみていきましょう。</p>
+</div>
+</div>
+<div class="section" id="fast-poetry-3-0">
+<h2>Fast Poetry 3.0<a class="headerlink" href="#fast-poetry-3-0" title="Permalink to this headline">¶</a></h2>
+<p>Fast Poetry のプラグインバージョンに目を向ける準備が整いましたね。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L1">twisted/plugins/fastpoetry_plugin.py</a> にあります。</p>
+<p>これまでの例とは異なるディレクトリ名であることに気付いたでしょうか。
+<cite>twistd</cite> が、Python モジュールの検索パスから見て <cite>twisted/plugins</cite> ディレクトリにあるプラグインファイルを要求するためです。
+ディレクトリはパッケージである必要はありません (つまり <code class="docutils literal notranslate"><span class="pre">__init__.py</span></code> ファイルは不要です) し、
+パス上に複数の <cite>twisted/plugins</cite> ディレクトリがあっても構いません。
+<cite>twistd</cite> はそれらのすべてを見つけてくれるでしょう。
+プラグインのために使う実際のファイル名はどちらでも構いません。
+しかし、アプリケーションが実現することを表す名前にしておくべきでしょう。</p>
+<p>プラグインの最初の部分は <cite>tac</cite> ファイルの時と同じく、詩のプロトコルとファクトリ、そしてサービスの実装を含んでいます。
+なお先ほどとと同じように、このコードは通常は異なるモジュールにあるべきでしょうが、サンプルコードがひとつにまとまるように、プラグインにまとめています。</p>
+<p>次にプラグインのコマンドラインオプションの <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L45">宣言</a> があります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Options</span><span class="p">(</span><span class="n">usage</span><span class="o">.</span><span class="n">Options</span><span class="p">):</span>
+
+    <span class="n">optParameters</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">[</span><span class="s1">&#39;port&#39;</span><span class="p">,</span> <span class="s1">&#39;p&#39;</span><span class="p">,</span> <span class="mi">10000</span><span class="p">,</span> <span class="s1">&#39;The port number to listen on.&#39;</span><span class="p">],</span>
+        <span class="p">[</span><span class="s1">&#39;poem&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="s1">&#39;The file containing the poem.&#39;</span><span class="p">],</span>
+        <span class="p">[</span><span class="s1">&#39;iface&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="s1">&#39;localhost&#39;</span><span class="p">,</span> <span class="s1">&#39;The interface to listen on.&#39;</span><span class="p">],</span>
+        <span class="p">]</span>
+</pre></div>
+</div>
+<p>このコードは、 <cite>twistd</cite> コマンドラインでユーザーがプラグイン名の後ろに指定できるプラグイン特有のオプションを定義します。
+何をやっているか比較的明らかなので、ここで深くは見ていきません。
+プラグインの中心となるコードに進んでいきましょう。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L56">service maker クラス</a> です。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryServiceMaker</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="n">implements</span><span class="p">(</span><span class="n">service</span><span class="o">.</span><span class="n">IServiceMaker</span><span class="p">,</span> <span class="n">IPlugin</span><span class="p">)</span>
+
+    <span class="n">tapname</span> <span class="o">=</span> <span class="s2">&quot;fastpoetry&quot;</span>
+    <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;A fast poetry service.&quot;</span>
+    <span class="n">options</span> <span class="o">=</span> <span class="n">Options</span>
+
+    <span class="k">def</span> <span class="nf">makeService</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">options</span><span class="p">):</span>
+        <span class="n">top_service</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">MultiService</span><span class="p">()</span>
+
+        <span class="n">poetry_service</span> <span class="o">=</span> <span class="n">PoetryService</span><span class="p">(</span><span class="n">options</span><span class="p">[</span><span class="s1">&#39;poem&#39;</span><span class="p">])</span>
+        <span class="n">poetry_service</span><span class="o">.</span><span class="n">setServiceParent</span><span class="p">(</span><span class="n">top_service</span><span class="p">)</span>
+
+        <span class="n">factory</span> <span class="o">=</span> <span class="n">PoetryFactory</span><span class="p">(</span><span class="n">poetry_service</span><span class="p">)</span>
+        <span class="n">tcp_service</span> <span class="o">=</span> <span class="n">internet</span><span class="o">.</span><span class="n">TCPServer</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">options</span><span class="p">[</span><span class="s1">&#39;port&#39;</span><span class="p">]),</span> <span class="n">factory</span><span class="p">,</span>
+                                         <span class="n">interface</span><span class="o">=</span><span class="n">options</span><span class="p">[</span><span class="s1">&#39;iface&#39;</span><span class="p">])</span>
+        <span class="n">tcp_service</span><span class="o">.</span><span class="n">setServiceParent</span><span class="p">(</span><span class="n">top_service</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">top_service</span>
+</pre></div>
+</div>
+<p>このコードでは、 私たちのクラスが <code class="docutils literal notranslate"><span class="pre">IServiceMaker</span></code> と <code class="docutils literal notranslate"><span class="pre">IPlugin</span></code> の両方を実装する、と宣言するために <code class="docutils literal notranslate"><span class="pre">zope.interface.implements</span></code> 関数を使う方法が分かりますね。</p>
+<p>以前の <cite>tac</cite> ファイル実装から <code class="docutils literal notranslate"><span class="pre">makeService</span></code> のコードを見つけられるでしょう。
+しかし、今回は自分たちで <code class="docutils literal notranslate"><span class="pre">Application</span></code> オブジェクトを作成する必要がありません。
+アプリケーションが起動できるようにトップレベルのサービスを生成して返してあげるだけで良いのです。
+残りは <cite>twistd</cite> がやってくれます。
+<cite>twistd</cite> に与えられたプラグイン特有のコマンドラインオプションを取得するために <code class="docutils literal notranslate"><span class="pre">options</span></code> 引数を使っていることに注意してください。</p>
+<p>そのクラスを宣言した後に <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L81">やるべきこと</a> は次の一行だけです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">service_maker</span> <span class="o">=</span> <span class="n">PoetryServiceMaker</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><cite>twistd</cite> スクリプトはプラグインのインスタンスを見つけて、トップレベルサービスを構築するために使うでしょう。
+<cite>tac</cite> ファイルとは異なり、変数名は取るに足らないものです。
+私たちのオブジェクトが <code class="docutils literal notranslate"><span class="pre">IPlugin</span></code> と <code class="docutils literal notranslate"><span class="pre">IServiceMaker</span></code> の両方を実装していること次第です。</p>
+<p>自分たちのプラグインを作成しましたので、動かしてみましょう。
+<cite>twisted-intro</cite> ディレクトリにいるか、 <cite>twisted-intro</cite> ディレクトリが Python モジュールの検索パスに含まれていることを確認してくださいね。
+そうしたら <cite>twistd</cite> 自身を実行しましょう。
+プラグイン一覧のひとつに “fastpoetry” が見えるでしょうか。プラグインファイルに書いた説明文も表示されますよね。</p>
+<p><cite>twisted/plugins</cite> ディレクトリに <code class="docutils literal notranslate"><span class="pre">dropin.cache</span></code> と呼ばれる新しいファイルがあることにも気付きましたか。
+このファイルはプラグインが引き続いてスキャンするのを高速化するために <cite>twistd</cite> によって生成されます。</p>
+<p>よし、プラグインのヘルプを表示させましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">twistd</span> <span class="n">fastpoetry</span> <span class="o">--</span><span class="n">help</span>
+</pre></div>
+</div>
+<p>ヘルプ文には fastpoetry プラグイン特有のオプションもあるでしょう。
+最後に、私たちが作ったプラグインを実行させましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">twistd</span> <span class="n">fastpoetry</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10000</span> <span class="o">--</span><span class="n">poem</span> <span class="n">poetry</span><span class="o">/</span><span class="n">ecstasy</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>これで fastpoetry サーバがデーモンとして動き出します。
+先ほどと同じように、カレントディレクトリに <cite>twistd.pid</cite> と <cite>twistd.log</cite> の両方のファイルがあるでしょう。
+サーバをテストし終わったら停止させましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>kill `cat twistd.pid`
+</pre></div>
+</div>
+<p>これで Twisted プラグインの作り方が分かりましたね。</p>
+</div>
+<div class="section" id="id17">
+<h2>まとめ<a class="headerlink" href="#id17" title="Permalink to this headline">¶</a></h2>
+<p>このパートでは Twisted サーバをデーモンに変換することについて学びました。
+Twisted のロギングシステムと、 <cite>twistd</cite> を使って Twisted アプリケーションをデーモンプロセスとして起動する方法にも触れました。
+デーモンの設定は <cite>tac</cite> 設定ファイルか Twisted プラグインのどちらかから読み取ります。
+“<a class="reference internal" href="p17.html"><span class="doc">パート17: 「コールバック」ではない方法</span></a>”では、非同期プログラミングのより本質的なトピックに戻り、Twisted でコールバック群を構成するもう一つの方法を見ていきましょう。</p>
+</div>
+<div class="section" id="id18">
+<h2>おすすめの練習問題<a class="headerlink" href="#id18" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>ふたつ目の詩を異なるポートで提供するように <cite>tac</cite> ファイルを修正してみましょう。
+異なる <code class="docutils literal notranslate"><span class="pre">MultiService</span></code> オブジェクトを使うことにより、それぞれの詩のためのサービスは別々にしてください。</p></li>
+<li><p>詩のプロキシサーバを開始させるための新しい <cite>tac</cite> ファイルを作ってみましょう。</p></li>
+<li><p>オプションとして二つ目の詩のファイルを受け付けて、それは二つ目のポートで提供するようにプラグインファイルを修正してみましょう。</p></li>
+<li><p>詩のプロキシサーバ用に新しいプラグインファイルを作ってみましょう。</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p15.html">パート15: テストされた詩</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p17.html">パート17: 「コールバック」ではない方法</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

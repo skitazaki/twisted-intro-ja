@@ -1,0 +1,188 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート11: 詩が提供されました &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート12: 詩の変換サーバー" href="p12.html" />
+    <link rel="prev" title="パート10: 変換された詩" href="p10.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート11: 詩が提供されました</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p10.html">パート10: 変換された詩</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p12.html">パート12: 詩の変換サーバー</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="id1">
+<h1>パート11: 詩が提供されました<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="twisted">
+<h2>Twisted の詩のサーバ<a class="headerlink" href="#twisted" title="Permalink to this headline">¶</a></h2>
+<p>Twisted を使ってクライアントを実装することに関してはたくさんのことを学んできましたので、同じように、サーバを再実装することに目を向けてみましょう。
+Twisted の抽象化が汎用性である恩恵によって、必要なことは既に身に着いていることが分かるでしょう。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/fastpoetry.py#L1">twisted-server-1/fastpoetry.py</a> にある Twisted による詩のサーバに目を通してみてください。
+このサーバは何の遅延もなくできる限り素早く詩を送り出しますので <code class="docutils literal notranslate"><span class="pre">fastpoetry</span></code> と呼ぶことにしましょう。
+クライアントのコードより遥かに少ない記述量ですね。</p>
+<p>部分部分に分けて取り上げていくことにしましょう。まずは <code class="docutils literal notranslate"><span class="pre">PoetryProtocol</span></code> です。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryProtocol</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">connectionMade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">poem</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">loseConnection</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>クライアントと同じように、サーバも接続を管理する (ここでは、クライアントからサーバへの接続です) ために <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> インスタンスを使います。
+ここでの <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> は、詩のプロトコルにおけるサーバ側を実装しています。
+私たちが使う接続プロトコルは厳密に片方向ですので、サーバの <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> インスタンスはデータを送るときにだけ接続されます。
+私たちが使う接続プロトコルは、接続が確立されるとすぐにサーバが詩を送り始めますので、 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L351">connectionMade</a> メソッドを実装します。
+これは <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> インスタンスが <code class="docutils literal notranslate"><span class="pre">Transport</span></code> につながった後に呼び出されるコールバックです。</p>
+<p>私たちのメソッドは <code class="docutils literal notranslate"><span class="pre">Transport</span></code> に二つのことをするように伝えます。
+詩の文章すべてを送ること (<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1302">self.transport.write</a>) と、接続を閉じること (<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L1321">self.transport.loseConnection</a>) です。
+もちろん、どちらの操作も非同期です。
+<code class="docutils literal notranslate"><span class="pre">write()</span></code> の呼び出しは実際は「いつかはすべてのデータをクライアントに送る」ことで、 <code class="docutils literal notranslate"><span class="pre">loseConnection()</span></code> の呼び出しは「書き込むようにお願いしておいた全てのデータを書き終えたら接続を閉じる」ことを意味します。</p>
+<p>お分かりのように、 <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> は <code class="docutils literal notranslate"><span class="pre">Factory</span></code> から詩のテキストを受け取ります。
+その部分を見てみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryFactory</span><span class="p">(</span><span class="n">ServerFactory</span><span class="p">):</span>
+
+    <span class="n">protocol</span> <span class="o">=</span> <span class="n">PoetryProtocol</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">poem</span> <span class="o">=</span> <span class="n">poem</span>
+</pre></div>
+</div>
+<p>随分単純になりましたね。
+ここでのファクトリーの実際の仕事は、要求に合わせて <code class="docutils literal notranslate"><span class="pre">PoetryProtocol</span></code> インスタンスを生成することを除くと、それぞれの <code class="docutils literal notranslate"><span class="pre">PoetryClient</span></code> がクライアントに送り出す詩を保存しておくことだけです。</p>
+<p><code class="docutils literal notranslate"><span class="pre">ClientFactory</span></code> ではなく <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L317">ServerFactory</a> をサブクラス化していることに注意してください。
+能動的に接続しにいくのではなく、サーバは受動的に接続を待ち受けますので、 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/protocol.py#L103">ClientFactory</a>  が提供する以上のメソッドは必要ありません。
+どうやってそれを確認できるのでしょうか？
+私たちは <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/interfaces.py#L224">listenTCP</a> という reactor のメソッドを使っていて、そのメソッドにおけるドキュメントでは <code class="docutils literal notranslate"><span class="pre">factory</span></code> 引数は <code class="docutils literal notranslate"><span class="pre">ServerFactory</span></code> のインスタンスであるべきだと述べているのです。</p>
+<p><code class="docutils literal notranslate"><span class="pre">listenTCP</span></code> を呼び出す <code class="docutils literal notranslate"><span class="pre">main</span></code> 関数はこのようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+    <span class="n">options</span><span class="p">,</span> <span class="n">poetry_file</span> <span class="o">=</span> <span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="n">poem</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="n">poetry_file</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+
+    <span class="n">factory</span> <span class="o">=</span> <span class="n">PoetryFactory</span><span class="p">(</span><span class="n">poem</span><span class="p">)</span>
+
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+
+    <span class="n">port</span> <span class="o">=</span> <span class="n">reactor</span><span class="o">.</span><span class="n">listenTCP</span><span class="p">(</span><span class="n">options</span><span class="o">.</span><span class="n">port</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">,</span> <span class="n">factory</span><span class="p">,</span>
+                             <span class="n">interface</span><span class="o">=</span><span class="n">options</span><span class="o">.</span><span class="n">iface</span><span class="p">)</span>
+
+    <span class="nb">print</span> <span class="s1">&#39;Serving </span><span class="si">%s</span><span class="s1"> on </span><span class="si">%s</span><span class="s1">.&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">poetry_file</span><span class="p">,</span> <span class="n">port</span><span class="o">.</span><span class="n">getHost</span><span class="p">())</span>
+
+    <span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>これは基本的に次の３つのことを行います。</p>
+<ol class="arabic simple">
+<li><p>提供する詩のテキストを読み込みます。</p></li>
+<li><p>提供する詩に対する <code class="docutils literal notranslate"><span class="pre">PoetryFactory</span></code> を生成します。</p></li>
+<li><p>指定されたポートで接続を待ち受けるよう Twisted に伝えるために  <code class="docutils literal notranslate"><span class="pre">listenTCP</span></code> を使い、新しい接続に対するプロトコルのインスタンスを生成するためには我々が定義したファクトリを使います。</p></li>
+</ol>
+<p>さて、残るは reactor にループの開始を伝えることだけです。
+このサーバをテストするためには、これまで登場したあらゆる詩のクライアント (あるいは単に <code class="docutils literal notranslate"><span class="pre">netcat</span></code>) を利用できます。</p>
+</div>
+<div class="section" id="id2">
+<h2>議論<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>パート５の”<a class="reference internal" href="p05.html#figure8"><span class="std std-ref">図８：プロトコルが生成されるとき</span></a>”と”<a class="reference internal" href="p05.html#figure9"><span class="std std-ref">図９：プロトコルと Transport の出会い</span></a>”を思い出してください。
+これらの図は、Twisted が接続したときに、新しい <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> インスタンスがどのように生成および初期化されるかを描き出しています。
+待ち受けポートへの接続と同じ機構が使われていることが分かります。
+これこそが <code class="docutils literal notranslate"><span class="pre">connectTCP</span></code> と <code class="docutils literal notranslate"><span class="pre">listenTCP</span></code> の両方ともが <code class="docutils literal notranslate"><span class="pre">factory</span></code> 引数を必要とする理由です。</p>
+<p>“<a class="reference internal" href="p05.html#figure9"><span class="std std-ref">図９：プロトコルと Transport の出会い</span></a>”で見えなかったことのひとつは、 <code class="docutils literal notranslate"><span class="pre">connectionMade</span></code> コールバックも <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> の初期化中に呼び出されることです。
+何が起ころうともこれは実行されますが、クライアントコードでは私たちがそれを使うことはありませんでした。
+また、私たちがクライアントコードで使用した <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> メソッドは、サーバの実装では使われていません。
+もしも私たちがやりたければ、クライアントとサーバの両方で動作する単一の <code class="docutils literal notranslate"><span class="pre">PoetryProtocol</span></code> がある共有ライブラリを作成することもできるでしょう。
+実際にこれが Twisted における典型的なやり方です。
+例えば <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/protocols/basic.py#L31">NetstringReceiver</a> プロトコルは、 <code class="docutils literal notranslate"><span class="pre">Transport</span></code> から <a class="reference external" href="http://en.wikipedia.org/wiki/Netstrings">netstrings</a> を読むことも書くこともできます。</p>
+<p>サーバの低レベルなバージョンを実装することはスキップしました。
+しかし、背後でどのようなことが起こっているかを考えてみましょう。
+まず、 <code class="docutils literal notranslate"><span class="pre">listenTCP</span></code> の呼び出しは Twisted に <a class="reference external" href="http://en.wikipedia.org/wiki/Berkeley_sockets#listen.28.29">listening socket</a> (訳注:待ち受けソケット、と表記) を作成するよう伝えて、それをイベントループに付け足します。
+待ち受けソケットにおける “event” とは、そこに読むべきデータがあることを意味するものではありません。
+そうではなく、繋ぎにきているクライアントが待っていることを意味します。</p>
+<p>Twisted は接続要求を自動的に <a class="reference external" href="http://en.wikipedia.org/wiki/Berkeley_sockets#accept.28.29">accept</a> するでしょう。
+このため、個別のクライアントとサーバが直接接続する新しいクライアントソケットを生成します。
+このクライアントソケットはイベントループに追加されます。そこでは、決まったクライアント向けに、Twisted が新しい <code class="docutils literal notranslate"><span class="pre">Transport</span></code> と (<code class="docutils literal notranslate"><span class="pre">PoetryFactory</span></code> 越しに) <code class="docutils literal notranslate"><span class="pre">PoetryProtocol</span></code> インスタンスを生成します。
+このため、 <code class="docutils literal notranslate"><span class="pre">Protocol</span></code> インスタンスはクライアントソケットにいつも接続されています。待ち受けソケットではありません。</p>
+<p>ここまでのことを図にしてみると図26のようになります。</p>
+<div class="figure align-default" id="id4">
+<span id="figure26"></span><img alt="_images/p11_server-1.png" src="_images/p11_server-1.png" />
+<p class="caption"><span class="caption-text">図２６：動いている詩のサーバ</span><a class="headerlink" href="#id4" title="Permalink to this image">¶</a></p>
+</div>
+<p>この図には、詩のサーバに接続された３つのクライアントがあります。
+それぞれの <code class="docutils literal notranslate"><span class="pre">Transport</span></code> はひとつのクライアントソケットを表現します。待ち受けソケットは <code class="docutils literal notranslate"><span class="pre">select</span></code> ループを使って、合わせて４つのファイルディスクリプタを生成します。
+クライアントが切断されたとき、関連する <code class="docutils literal notranslate"><span class="pre">Transport</span></code> と <code class="docutils literal notranslate"><span class="pre">PoetryProtocol</span></code> は関係を断ち切られて回収 (garbage-collected) されます。私たちがどこかでそれらのうちのひとつへの参照を断ち切らなかったことを想像してみれば、メモリリークを防止するための慣習だと分かりますね。
+一方で、私たちの詩のサーバーが延々と新しい接続を待ち続ける間は、 <code class="docutils literal notranslate"><span class="pre">PoetryFactory</span></code> はずっと残り続けるでしょう。
+詩の美しさみたいですね。
+いずれにせよ、図26は大きな枠組みの丁度良い部分を切り出しているのではないでしょうか。</p>
+<p>提供している詩が比較的短いものならば、クライアントソケットとそれに関連する Python オブジェクトはそれほど長くは存続しません。
+しかし、巨大な詩を提供していてとても忙しいサーバならば、何百何千というクライアントが同時に接続することになってしまうでしょう。
+でも、それで良いのです。
+Twisted には処理できる接続数の制限が組み込まれていません。
+もちろん、いかなるサーバでも負荷を上げればいつかは耐え切れなくなるか、内部的な OS の制限に達してしまうこともあるでしょう。
+とはいえ、高負荷のサーバにとっては、注意深い計測やテストは日常茶飯事なのです。</p>
+<p>Twisted は待ち受けるポートの数にも制限を設けていません。
+実際、単一の Twisted プロセスは何十というポートを待ち受けて、それぞれのポートで別々のサービスを提供できます (それぞれの <code class="docutils literal notranslate"><span class="pre">listenTCP</span></code> 呼び出しで異なるファクトリクラスを使うのです)。
+そして注意深く設計されていると、複数のサービスを単一の Twisted プロセスにするか複数のプロセスにするかを、配備する段階まで先延ばしすることさえ可能になるでしょう。</p>
+<p>私たちが実装したサーバに不足していることもいくつかあります。
+まずは何といっても、問題のデバッグやネットワークの分析に役立つであろうログを出力しません。
+さらに、サーバはデーモンとして実行されていませんので、不用意な <code class="docutils literal notranslate"><span class="pre">Ctrl+C</span></code> (あるいは、ただログアウトしたとき) で停止してしまう脆弱性があります。
+こうした問題は先々のパートで修正していきますが、”<a class="reference internal" href="p12.html"><span class="doc">パート12: 詩の変換サーバー</span></a>”では、詩を変換するもうひとつのサーバを実装してみます。</p>
+</div>
+<div class="section" id="id3">
+<h2>おすすめの練習問題<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>“<a class="reference internal" href="p02.html"><span class="doc">パート2: ゆったりした詩と世紀末</span></a>”でクライアントを書いたように、Twisted を使わないで非同期な詩のサーバを書いてください。
+読み込みのために待ち受けソケットは監視される必要があることに注意してください。読み込み可能な待ち受けソケットとは、新しいクライアントソケットを <code class="docutils literal notranslate"><span class="pre">accept</span></code> できることを意味します。</p></li>
+<li><p>“<a class="reference internal" href="p04.html"><span class="doc">パート4: Twisted で詩を</span></a>”でクライアントを実装したように、 <code class="docutils literal notranslate"><span class="pre">listenTCP</span></code> やプロトコル、トランスポート、あるいはファクトリを除いた部分の Twisted を使って、低レベルの非同期な詩のサーバを記述してください。
+自前の <code class="docutils literal notranslate"><span class="pre">select</span></code> ループの代わりに Twisted の reactor を使うのは構いません。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">transport.write()</span></code> を複数回呼び出すために <code class="docutils literal notranslate"><span class="pre">callLater</span></code> か <code class="docutils literal notranslate"><span class="pre">LoopingCall</span></code> を使って、Twisted の詩のサーバの高レベルバージョンを「遅いサーバ」にしてください。
+ブロッキングサーバーに対しては <code class="docutils literal notranslate"><span class="pre">--num-bytes</span></code> と <code class="docutils literal notranslate"><span class="pre">--delay</span></code> コマンドラインオプションを追加しましょう。
+クライアントが詩の全てを受け取る前に接続断になった場合を扱うことも忘れないでください。</p></li>
+<li><p>複数の詩を (異なるポートで) 提供できるように、高レベルの Twisted サーバを拡張してみましょう。</p></li>
+<li><p>同じ Twisted のプロセスで複数のサービスを提供する理由が何かありますか？そうしない理由は何でしょうか？</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p10.html">パート10: 変換された詩</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p12.html">パート12: 詩の変換サーバー</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

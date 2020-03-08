@@ -1,0 +1,573 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート19: 欲しいと思っていても考えを改めると &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート20: 車輪の中の車輪: Twisted と Erlang" href="p20.html" />
+    <link rel="prev" title="パート18: Deferreds En Masse" href="p18.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート19: 欲しいと思っていても考えを改めると</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p18.html">パート18: Deferreds En Masse</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p20.html">パート20: 車輪の中の車輪: Twisted と Erlang</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="id1">
+<h1>パート19: 欲しいと思っていても考えを改めると<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id2">
+<h2>はじめに<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>Twisted は現在進行形のプロジェクトですから、Twisted の開発者は日常的に新しい機能を追加したり、古い機能を拡張しています。
+Twisted 10.1.0 のリリースでは、 <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスに新しい機能が追加されました。 <cite>cancellation</cite> です。
+今日はこれについて掘り進めていきましょう。</p>
+<p>非同期プログラミングはリクエストとレスポンスを分離し、新しい可能性をもたらします。
+結果を要求することと、その結果を受け取ることの間に、それ以上は必要ないと決めるかもしれませんね。
+“<a class="reference internal" href="p14.html"><span class="doc">パート14: Deferred が無かったら</span></a>” で作成した詩のプロキシサーバを考えてみましょう。
+プロキシの動作は以下のようになります。少なくとも詩への最初のリクエストでは。</p>
+<ul class="simple">
+<li><p>詩へのリクエストがやってきます。</p></li>
+<li><p>プロキシは詩を受け取るために実際のサーバに問い合わせます。</p></li>
+<li><p>詩を受け取り終えると、元のクライアントに送ります。</p></li>
+</ul>
+<p>どれもがうまくいけば良いですが、詩を受け取る前にクライアントがハングしたらどうしましょうか？
+<a class="reference external" href="http://www.online-literature.com/milton/paradiselost/">Paradise Lost</a> の完全なテキストを要求したものの、実は <a class="reference external" href="http://www.toyomasu.com/haiku/#kojo">Kojo</a> の俳句を欲しかったとしたらどうでしょう。
+プロキシは最初の詩をダウンロードすることに固執し、ゆっくりしたサーバはしばらく時間をかけてきます。
+接続を閉じてしまい、ゆっくりしたサーバにはスリープしてもらった方が良いかもしれませんね。</p>
+<p>“<a class="reference internal" href="p09.html#figure15"><span class="std std-ref">図１５：同期コードと例外</span></a>”を思い出してください。同期プログラムでの概念的な制御フローを示すダイアグラムです。
+あの図では、関数呼び出しが下に下っていき、例外は上に戻ってくることを確認しました。
+同期する関数呼び出しをキャンセルしたいとき (これは単なる仮説です) は、  フロー制御は関数呼び出しと同じ方向に進んでいくでしょう。
+図38の高レベルのコードから低レベルのコードに進んでいくようにです。</p>
+<div class="figure align-default" id="id16">
+<span id="figure38"></span><img alt="_images/p19_sync-cancel.png" src="_images/p19_sync-cancel.png" />
+<p class="caption"><span class="caption-text">図38：理論的なキャンセルもある、同期プログラムにおける情報の伝わり方</span><a class="headerlink" href="#id16" title="Permalink to this image">¶</a></p>
+</div>
+<p>もちろん同期プログラムでは、キャンセルすべき箇所がないために、高レベルのコードは低レベルの操作が終了するまで再開さえできませんから、そのようなことは不可能です。
+しかし非同期プログラムでは、高レベルのコードは低レベルのコードが実行終了する前にプログラムの制御を獲得します。
+少なくとも、低レベルのリクエストが終了する前に、それをキャンセルできる可能性があります。</p>
+<p>Twisted プログラムでは、低レベルのリクエストは <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> オブジェクトによってひつとにまとめられ、未解決の非同期操作に対する「ハンドル」(“handle”) として考えられます。
+遅延オブジェクト内の情報の通常のフローは下方向に向かいます、低レベルのコードから高レベルのコードに移ることです。
+これは、同期プログラムで情報が戻ってくるフローに合致します。
+Twisted 10.1.0 からは、高レベルのコードは情報を送り返すことができるようになりました。
+低レベルのコードに、結果はもういらない、と伝えられるのです。
+図39を見てください。</p>
+<div class="figure align-default" id="id17">
+<span id="figure39"></span><img alt="_images/p19_deferred-cancel.png" src="_images/p19_deferred-cancel.png" />
+<p class="caption"><span class="caption-text">図39：キャンセルも含んだ遅延オブジェクトにおける情報の伝わり方</span><a class="headerlink" href="#id17" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<div class="section" id="id3">
+<h2>遅延オブジェクトをキャンセルする<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>遅延オブジェクトをキャンセルすることが実際にどうやって動作するかを理解するために、いくつかのサンプルプログラムに目を通していきましょう。
+なお、この例や、このパートの他のコードを実行させるためには <a class="reference external" href="http://twistedmatrix.com/trac/wiki/Downloads">Twisted 10.1.0 かそれ以降のバージョン</a> が必要です。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-1.py#L1">deferred-cancel/defer-cancel-1.py</a> について考えてみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">callback</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;callback got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">callback</span><span class="p">)</span>
+<span class="n">d</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+<span class="nb">print</span> <span class="s1">&#39;done&#39;</span>
+</pre></div>
+</div>
+<p>新しいキャンセル機能により、 <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスには <code class="docutils literal notranslate"><span class="pre">cancel</span></code> という新しいメソッドが追加されました。
+このコード例では、遅延オブジェクトを新しく生成し、コールバックを付け加えて、発火させずに遅延オブジェクトをキャンセルします。
+次のような出力になります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">done</span>
+<span class="n">Unhandled</span> <span class="n">error</span> <span class="ow">in</span> <span class="n">Deferred</span><span class="p">:</span>
+<span class="n">Traceback</span> <span class="p">(</span><span class="n">most</span> <span class="n">recent</span> <span class="n">call</span> <span class="n">last</span><span class="p">):</span>
+<span class="n">Failure</span><span class="p">:</span> <span class="n">twisted</span><span class="o">.</span><span class="n">internet</span><span class="o">.</span><span class="n">defer</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
+</pre></div>
+</div>
+<p>遅延オブジェクトをキャンセルすることは、エラー用コールバックのチェーンを実行させるかのようですね。
+そして、通常のコールバックは決して呼び出されません。
+そのエラーは <code class="docutils literal notranslate"><span class="pre">twisted.internet.defer.CancelledError</span></code> であることにも注意しましょう。
+これは、遅延オブジェクトがキャンセルされたことを意味する独自の Exception です (もう少し先まで読んで！)。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-2.py#L1">deferred-cancel/defer-cancel-2.py</a> でエラー用コールバックを追加してみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">callback</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;callback got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="k">def</span> <span class="nf">errback</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;errback got:&#39;</span><span class="p">,</span> <span class="n">err</span>
+
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">callback</span><span class="p">,</span> <span class="n">errback</span><span class="p">)</span>
+<span class="n">d</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+<span class="nb">print</span> <span class="s1">&#39;done&#39;</span>
+</pre></div>
+</div>
+<p>実行させてみると、このような出力になります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>errback got: [Failure instance: Traceback (failure with no frames): &lt;class &#39;twisted.internet.defer.CancelledError&#39;&gt;:]
+done
+</pre></div>
+</div>
+<p>つまり、他のどのような遅延オブジェクトの失敗とも同じように、キャンセルからのエラー用コールバックを ‘catch’ できます。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-3.py#L1">deferred-cancel/defer-cancel-3.py</a> にあるように、遅延オブジェクトを発火させてから、キャンセルしてみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">callback</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;callback got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="k">def</span> <span class="nf">errback</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;errback got:&#39;</span><span class="p">,</span> <span class="n">err</span>
+
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">callback</span><span class="p">,</span> <span class="n">errback</span><span class="p">)</span>
+<span class="n">d</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;result&#39;</span><span class="p">)</span>
+<span class="n">d</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+<span class="nb">print</span> <span class="s1">&#39;done&#39;</span>
+</pre></div>
+</div>
+<p>ここでは <code class="docutils literal notranslate"><span class="pre">callback</span></code> メソッドを使って普通に遅延オブジェクトを発火させ、キャンセルします。
+出力です。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">callback</span> <span class="n">got</span><span class="p">:</span> <span class="n">result</span>
+<span class="n">done</span>
+</pre></div>
+</div>
+<p>コールバックは呼び出され (予想通りですね)、プログラムは普通に終了しました。あたかも <code class="docutils literal notranslate"><span class="pre">cancel</span></code> は呼ばれなかったかのようですね。
+ということで、遅延オブジェクトが発火済みだと、キャンセルすることは影響がないように見えます。(でも、もう少し先まで読んで！).</p>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-4.py#L1">deferred-cancel/defer-cancel-4.py</a>
+にあるように、キャンセルした「後」に遅延オブジェクトを発火させるとどうでしょう？</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">callback</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;callback got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="k">def</span> <span class="nf">errback</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;errback got:&#39;</span><span class="p">,</span> <span class="n">err</span>
+
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">callback</span><span class="p">,</span> <span class="n">errback</span><span class="p">)</span>
+<span class="n">d</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+<span class="n">d</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;result&#39;</span><span class="p">)</span>
+<span class="nb">print</span> <span class="s1">&#39;done&#39;</span>
+</pre></div>
+</div>
+<p>そのような場合には、次の出力になります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>errback got: [Failure instance: Traceback (failure with no frames): &lt;class &#39;twisted.internet.defer.CancelledError&#39;&gt;:]
+done
+</pre></div>
+</div>
+<p>おもしろいですね！
+ふたつ目の例とまったく同じ出力です。遅延オブジェクトをまったく発火させていませんでしたね。
+遅延オブジェクトがキャンセル済みだと、それを発火させても普通は何の影響もありません。
+しかし、遅延オブジェクトを一回以上発火できるはずで、エラー用コールバックチェーンは明らかに動作しているのに、
+どうして <code class="docutils literal notranslate"><span class="pre">d.callback('result')</span></code> はエラーを発生させなかったのでしょうか？</p>
+<p>もう一度”<a class="reference internal" href="#figure39"><span class="std std-ref">図39：キャンセルも含んだ遅延オブジェクトにおける情報の伝わり方</span></a>”について考えてみましょう。
+正常な結果あるいは失敗を与えて遅延オブジェクトを発火させることは、低レベルコードの仕事です。
+一方で、遅延オブジェクトのキャンセルは、高レベルコードによって実行されます。
+遅延オブジェクトを発火させることは「これが結果ですよ」という意味です。
+一方で、遅延オブジェクトをキャンセルすることは「これ以上は何もいらないよ」という意味です。
+そして、キャンセルは新しい機能であることを思い出してください。
+既存のほとんどの Twisted のコードは、キャンセル操作を処理するようには記述されていません。
+しかし、Twisted の開発者たちはいかなる遅延オブジェクトもキャンセルできるようにしました。
+たとえそのコードが Twisted 10.1.0 以前に書かれたものであっても。</p>
+<p>この実現において、 <code class="docutils literal notranslate"><span class="pre">cancel</span></code> メソッドは実際にはふたつのことを行います。</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">Deferred</span></code> オブジェクト自身に、まだ発生していなければ (つまり、遅延オブジェクトが発火されていなければ) 結果はいらないと伝え、後続するいかなる <code class="docutils literal notranslate"><span class="pre">callback</span></code> や <code class="docutils literal notranslate"><span class="pre">errback</span></code> の呼び出しも無視します。</p></li>
+<li><p>そして、その影響として、結果を生成している最中の低レベルのコードに、操作をキャンセルするために要求されるすべてのステップを踏むようにと伝えます。</p></li>
+</ol>
+<p>古い Twisted のコードは先へ先へと進み、キャンセルされた遅延オブジェクトも構わずに発火させますので、
+ステップ１は、もしも古いライブラリから受け取った遅延オブジェクトをキャンセルしても、私たちのプログラムが台無しにならないことを保証してくれます。</p>
+<p>このことは、私たちはいつも遅延オブジェクトのキャンセルに気を払わなくとも良いことを意味します。
+結果が届かなければ (たとえ後で届くとしても)、それはもう受け取らないと確信できます。
+しかし、遅延オブジェクトのキャンセルは、実は非同期操作のキャンセルではないかもしれません。
+非同期操作を中止するにはコンテキストに特有の処理を必要とします。
+ネットワーク接続を閉じる必要があるかもしれませんし、データベースのトランザクションをロールバックする、あるいはサブプロセスを <cite>kill</cite> する、などなど。
+また、遅延オブジェクトは汎用的なコールバックを構成するためのものですから、キャンセルするときに特定の処理を行うことを教えるにはどうしましょうか？
+もしくはその代わりに、最初に遅延オブジェクトが生成されて返される低レベルのコードに、キャンセル要求を転送することはできるでしょうか？
+今はこう言わせてください。</p>
+<blockquote>
+<div><p>知ってるさ、コールバックを使うんだ！</p>
+</div></blockquote>
+</div>
+<div class="section" id="id4">
+<h2>遅延オブジェクトをキャンセルする、本当に<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>それじゃあ <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-5.py#L1">deferred-cancel/defer-cancel-5.py</a> を見ていきましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">canceller</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s2">&quot;I need to cancel this deferred:&quot;</span><span class="p">,</span> <span class="n">d</span>
+
+<span class="k">def</span> <span class="nf">callback</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;callback got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="k">def</span> <span class="nf">errback</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;errback got:&#39;</span><span class="p">,</span> <span class="n">err</span>
+
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">(</span><span class="n">canceller</span><span class="p">)</span> <span class="c1"># created by lower-level code</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">callback</span><span class="p">,</span> <span class="n">errback</span><span class="p">)</span> <span class="c1"># added by higher-level code</span>
+<span class="n">d</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+<span class="nb">print</span> <span class="s1">&#39;done&#39;</span>
+</pre></div>
+</div>
+<p>このコードは基本的に二番目の例と同じです。
+みっつ目のコールバック (<code class="docutils literal notranslate"><span class="pre">canceller</span></code>) があることを除けば。これは、後で追加されるのではなく、生成されたときに <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> へ渡されます。
+このコールバックは、非同期操作を停止させる (もちろん、遅延オブジェクトが実際にキャンセルされたときのみです) ために必要となるコンテキスト特有のアクションを実行することに責任を持ちます。
+<code class="docutils literal notranslate"><span class="pre">canceller</span></code> コールバックは必然的に遅延オブジェクトを返す低レベルのコードの一部です。
+遅延オブジェクトを受け取って自分自身のコールバックとエラー用コールバックを追加するような高レベルのコードではありません。
+サンプルコードを実行させて、次の出力を確認しましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>I need to cancel this deferred: &lt;Deferred at 0xb7669d2cL&gt;
+errback got: [Failure instance: Traceback (failure with no frames): &lt;class &#39;twisted.internet.defer.CancelledError&#39;&gt;:]
+done
+</pre></div>
+</div>
+<p>ご覧のように、 <code class="docutils literal notranslate"><span class="pre">canceller</span></code> コールバックは、もはや結果を必要としない遅延オブジェクトを与えられます。
+この部分は、非同期操作を停止するために必要な、いかなるアクションも受け取れるところなのです。
+<code class="docutils literal notranslate"><span class="pre">canceller</span></code> は、エラー用コールバックのチェーンが発火するより前に呼び出されていることに注意しましょう。
+実際この時点では、私たちが選択する何らかの結果あるいはエラーを与えて、私たち自身の遅延オブジェクトを発火するかもしれません
+(それゆえ、 <code class="docutils literal notranslate"><span class="pre">CancelledError</span></code> の失敗を先取りします)。
+どちらの可能性も <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-6.py#L1">deferred-cancel/defer-cancel-6.py</a> と <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-7.py#L1">deferred-cancel/defer-cancel-7.py</a> で説明されます。</p>
+<p>reactor を立ち上げる前に、もうひとつ簡単なテストをやってみましょう。
+<code class="docutils literal notranslate"><span class="pre">canceller</span></code> コールバックを持つ遅延オブジェクトを生成し、普通に発火させてからキャンセルします。
+コードは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-8.py#L1">deferred-cancel/defer-cancel-8.py</a> にあります。
+スクリプトの出力を検証することによって、遅延オブジェクトが発火された後にキャンセルすることは <code class="docutils literal notranslate"><span class="pre">canceller</span></code> コールバックを呼び出すことではない、と分かります。
+キャンセルすべきものがありませんので、想定した通りです。</p>
+<p>ここまで私たちが見てきた例は、実際のところ非同期操作ではありませんでした。
+非同期操作を呼び出す簡単なプログラムを作成しましょう。操作をキャンセル可能にする方法が分かるはずです。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-9.py#L1">deferred-cancel/defer-cancel-9.py</a> のコードについて考えます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet.defer</span> <span class="kn">import</span> <span class="n">Deferred</span>
+
+<span class="k">def</span> <span class="nf">send_poem</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;Sending poem&#39;</span>
+    <span class="n">d</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;Once upon a midnight dreary&#39;</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">get_poem</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Return a poem 5 seconds later.&quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">Deferred</span><span class="p">()</span>
+    <span class="n">reactor</span><span class="o">.</span><span class="n">callLater</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">send_poem</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">d</span>
+
+<span class="k">def</span> <span class="nf">got_poem</span><span class="p">(</span><span class="n">poem</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;I got a poem:&#39;</span><span class="p">,</span> <span class="n">poem</span>
+
+<span class="k">def</span> <span class="nf">poem_error</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;get_poem failed:&#39;</span><span class="p">,</span> <span class="n">err</span>
+
+<span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+    <span class="n">reactor</span><span class="o">.</span><span class="n">callLater</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="n">reactor</span><span class="o">.</span><span class="n">stop</span><span class="p">)</span> <span class="c1"># stop the reactor in 10 seconds</span>
+
+    <span class="n">d</span> <span class="o">=</span> <span class="n">get_poem</span><span class="p">()</span>
+    <span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">got_poem</span><span class="p">,</span> <span class="n">poem_error</span><span class="p">)</span>
+
+    <span class="n">reactor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+
+<span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>この例には、 <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> が呼び出されてから５秒後に非同期に詩を返すために reactor の <code class="docutils literal notranslate"><span class="pre">callLater</span></code> メソッドを使う、 <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> (<code class="docutils literal notranslate"><span class="pre">send_poem</span></code> の間違い？) 関数があります。
+<code class="docutils literal notranslate"><span class="pre">main</span></code> 関数は <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> を呼び出し、コールバックとエラー用コールバックのペアを追加します。それから reactor を開始させます。
+10秒で reactor を停止させるための設定もしておきます (もう一度 <code class="docutils literal notranslate"><span class="pre">callLater</span></code> を使って)。
+普通に遅延オブジェクトにコールバックを割り当てることによってこれを実装しますが、なんでこうするかを簡潔に確認しておきましょう。</p>
+<p>コード例を実行させると、次の出力になります (適切な待ち時間の後で)。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Sending</span> <span class="n">poem</span>
+<span class="n">I</span> <span class="n">got</span> <span class="n">a</span> <span class="n">poem</span><span class="p">:</span> <span class="n">Once</span> <span class="n">upon</span> <span class="n">a</span> <span class="n">midnight</span> <span class="n">dreary</span>
+</pre></div>
+</div>
+<p>そして10秒後にプログラムは停止します。
+詩を送信される前に、この遅延オブジェクトをキャンセルしてみましょう。
+10秒後に遅延オブジェクトをキャンセルするために、ちょっとしたコードを追加します (詩自体が5秒遅れる前です)。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">reactor</span><span class="o">.</span><span class="n">callLater</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="n">d</span><span class="o">.</span><span class="n">cancel</span><span class="p">)</span> <span class="c1"># cancel after 2 seconds</span>
+</pre></div>
+</div>
+<p>プログラムの全体は <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-10.py#L1">deferred-cancel/defer-cancel-10.py</a> にあります。
+この出力は以下のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>get_poem failed: [Failure instance: Traceback (failure with no frames): &lt;class &#39;twisted.internet.defer.CancelledError&#39;&gt;:]
+Sending poem
+</pre></div>
+</div>
+<p>この例ははっきりと、遅延オブジェクトをキャンセルすることは、必ずしもその根底にある非同期リクエストをキャンセルしない、ということを描写しています。
+2秒後にエラー用コールバックからの出力がありますね。期待した通りに <code class="docutils literal notranslate"><span class="pre">CancelledError</span></code> を表示します。
+しかしそれでも、5秒後に <code class="docutils literal notranslate"><span class="pre">send_poem</span></code> からの出力が見えます (けれども、遅延オブジェクトのコールバックは発火しません)。</p>
+<p>この時点では、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-4.py#L1">deferred-cancel/defer-cancel-4.py</a> にあるのと同じ状況になっただけです。
+遅延オブジェクトを「キャンセルする」ことは、結局は結果がキャンセルされるようになりますが、本当のところで操作を停止はしないのです。
+ここまでで学んだように、本当にキャンセル可能な遅延オブジェクトを作成するためには、遅延オブジェクトが生成されたときに <code class="docutils literal notranslate"><span class="pre">cancel</span></code> コールバックを追加しなければなりません。</p>
+<p>この新しいコールバックは何をする必要があるのでしょうか？
+<code class="docutils literal notranslate"><span class="pre">callLater</span></code> メソッドの <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/interfaces.py#L556">ドキュメント</a> に目を通しましょう。
+<code class="docutils literal notranslate"><span class="pre">callLater</span></code> の戻り値は異なるオブジェクトで、 <code class="docutils literal notranslate"><span class="pre">IDelayedCall</span></code> を実装しており、実行されている部分から遅らされた呼び出しを防止するために使える <code class="docutils literal notranslate"><span class="pre">cancel</span></code> メソッドを持ちます。</p>
+<p>これはとてもシンプルですね。
+修正したコードは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-11.py#L1">deferred-cancel/defer-cancel-11.py</a> にあります。
+関連のある変更点はすべて <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> 関数にあります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">get_poem</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Return a poem 5 seconds later.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">canceler</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+        <span class="c1"># They don&#39;t want the poem anymore, so cancel the delayed call</span>
+        <span class="n">delayed_call</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+
+        <span class="c1"># At this point we have three choices:</span>
+        <span class="c1">#   1. Do nothing, and the deferred will fire the errback</span>
+        <span class="c1">#      chain with CancelledError.</span>
+        <span class="c1">#   2. Fire the errback chain with a different error.</span>
+        <span class="c1">#   3. Fire the callback chain with an alternative result.</span>
+
+    <span class="n">d</span> <span class="o">=</span> <span class="n">Deferred</span><span class="p">(</span><span class="n">canceler</span><span class="p">)</span>
+
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+    <span class="n">delayed_call</span> <span class="o">=</span> <span class="n">reactor</span><span class="o">.</span><span class="n">callLater</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="n">send_poem</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">d</span>
+</pre></div>
+</div>
+<p>新しいバージョンでは、キャンセルコールバックで利用できるように、 <code class="docutils literal notranslate"><span class="pre">callLater</span></code> からの戻り値を保存します。
+コールバックは <code class="docutils literal notranslate"><span class="pre">delayed_call.cancel()</span></code> を呼び出すだけです。
+しかし、上述の議論のように、遅延オブジェクト自身を発火させることも選べるでしょう。
+最新バージョンの例ではこのような出力になります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>get_poem failed: [Failure instance: Traceback (failure with no frames): &lt;class &#39;twisted.internet.defer.CancelledError&#39;&gt;:]
+</pre></div>
+</div>
+<p>お分かりのように、遅延オブジェクトはキャンセルされ、非同期操作は真の意味で中止されました (つまり <code class="docutils literal notranslate"><span class="pre">send_poem</span></code> の <code class="docutils literal notranslate"><span class="pre">print</span></code> 出力を見ることはありません)。</p>
+</div>
+<div class="section" id="id7">
+<h2>詩のプロキシ 3.0<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>導入部分で議論したように、詩のプロキシサーバーはキャンセル処理を実装するには格好の例です。
+誰も要求していないことが分かったら、詩のダウンロードを中止できるようにしましょう (つまり、クライアントは詩を送る前に接続を閉じます)。
+プロキシのバージョン 3.0 は、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-4/poetry-proxy.py#L1">twisted-server-4/poetry-proxy.py</a> にありますが、遅延オブジェクトのキャンセルを実装しています。
+最初の変更点は <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-4/poetry-proxy.py#L52">PoetryProxyProtocol</a> にあります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryProxyProtocol</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">connectionMade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">service</span><span class="o">.</span><span class="n">get_poem</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">write</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span><span class="o">.</span><span class="n">addBoth</span><span class="p">(</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">loseConnection</span><span class="p">())</span>
+
+    <span class="k">def</span> <span class="nf">connectionLost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reason</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">deferred</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">deferred</span><span class="p">,</span> <span class="kc">None</span>
+            <span class="n">deferred</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span> <span class="c1"># cancel the deferred if it hasn&#39;t fired</span>
+</pre></div>
+</div>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L52">古いバージョンの PoetryProxyProtocol</a> と比較してみます。
+ふたつの大きな変更点があります。</p>
+<ol class="arabic simple">
+<li><p>必要になったら後でキャンセルできるように、 <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> から受け取った遅延オブジェクトを保存します。</p></li>
+<li><p>接続が閉じられたときに遅延オブジェクトをキャンセルします。
+これは実際に詩を受け取った後に遅延オブジェクトもキャンセルすることに注意しましょう。
+しかし、この例で分かったように、発火済みの遅延オブジェクトをキャンセルすることは何の影響も与えません。</p></li>
+</ol>
+<p>今度は、遅延オブジェクトのキャンセルが本当に詩のダウンロードを中止しているかをはっきりさせる必要があります。
+これには <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-4/poetry-proxy.py#L105">ProxyService</a> を変更します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">ProxyService</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="n">poem</span> <span class="o">=</span> <span class="kc">None</span> <span class="c1"># the cached poem</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">host</span> <span class="o">=</span> <span class="n">host</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">port</span> <span class="o">=</span> <span class="n">port</span>
+
+    <span class="k">def</span> <span class="nf">get_poem</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">poem</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">print</span> <span class="s1">&#39;Using cached poem.&#39;</span>
+            <span class="c1"># return an already-fired deferred</span>
+            <span class="k">return</span> <span class="n">succeed</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">poem</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="nf">canceler</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+            <span class="nb">print</span> <span class="s1">&#39;Canceling poem download.&#39;</span>
+            <span class="n">factory</span><span class="o">.</span><span class="n">deferred</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">connector</span><span class="o">.</span><span class="n">disconnect</span><span class="p">()</span>
+
+        <span class="nb">print</span> <span class="s1">&#39;Fetching poem from server.&#39;</span>
+        <span class="n">deferred</span> <span class="o">=</span> <span class="n">Deferred</span><span class="p">(</span><span class="n">canceler</span><span class="p">)</span>
+        <span class="n">deferred</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">set_poem</span><span class="p">)</span>
+        <span class="n">factory</span> <span class="o">=</span> <span class="n">PoetryClientFactory</span><span class="p">(</span><span class="n">deferred</span><span class="p">)</span>
+        <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+        <span class="n">connector</span> <span class="o">=</span> <span class="n">reactor</span><span class="o">.</span><span class="n">connectTCP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">host</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="n">factory</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">factory</span><span class="o">.</span><span class="n">deferred</span>
+
+    <span class="k">def</span> <span class="nf">set_poem</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">poem</span> <span class="o">=</span> <span class="n">poem</span>
+        <span class="k">return</span> <span class="n">poem</span>
+</pre></div>
+</div>
+<p>もう一度 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#100">古いバージョンの PoetryService</a> と比較してみましょう。
+このクラスにはさらにいくつかの変更点があります。</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">reactor.connectTCP</span></code> の戻り値を保存します。
+保存したデータは <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/interfaces.py#L24">IConnector</a> オブジェクトです。
+接続を閉じるためにこのオブジェクトの <code class="docutils literal notranslate"><span class="pre">disconnect</span></code> メソッドを使えます。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">canceler</span></code> コールバックを持った遅延オブジェクトを作成します。
+このコールバックは、接続を閉じるために <code class="docutils literal notranslate"><span class="pre">connector</span></code> を使うクロージャーです。
+しかしまずは、 <code class="docutils literal notranslate"><span class="pre">factory.deferred</span></code> 属性に <code class="docutils literal notranslate"><span class="pre">None</span></code> を設定します。
+さもなければ、遅延オブジェクト自身が <code class="docutils literal notranslate"><span class="pre">CancelledError</span></code> を伴って発火する前に、ファクトリは “connection closed” というエラー用コールバックを渡して遅延オブジェクトを発火させるかもしれません。
+この遅延オブジェクトはキャンセルされましたので、 <code class="docutils literal notranslate"><span class="pre">CancelledError</span></code> と一緒に遅延オブジェクトを発火させることがより明示的になります。</p></li>
+</ol>
+<p>今回は <code class="docutils literal notranslate"><span class="pre">PoetryClientFactory</span></code> ではなく <code class="docutils literal notranslate"><span class="pre">ProxyService</span></code> で遅延オブジェクトを生成していることに気付いたでしょうか。
+キャンセラーコールバックは <code class="docutils literal notranslate"><span class="pre">IConnector</span></code> オブジェクトにアクセスする必要がありますので、遅延オブジェクトを生成するには <code class="docutils literal notranslate"><span class="pre">ProxyService</span></code> がもっとも便利な場所だ、といえます。</p>
+<p>そしてここまでの例のひとつにあるように、 <code class="docutils literal notranslate"><span class="pre">canceler</span></code> コールバックはクロージャーとして実装されています。
+キャンセルコールバックを実装するときにクロージャーはとても便利にみえますね！</p>
+<p>それでは、新しいプロキシを試してみましょう。
+まずは <cite>slow</cite> サーバを起動します。
+ゆっくり動きますから、キャンセルするための時間は十分にあります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">blocking</span><span class="o">-</span><span class="n">server</span><span class="o">/</span><span class="n">slowpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10001</span> <span class="n">poetry</span><span class="o">/</span><span class="n">fascination</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>プロキシを立ち上げましょう。 (Twisted 10.1.0 が必要であることを忘れないでくださいね)</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">4</span><span class="o">/</span><span class="n">poetry</span><span class="o">-</span><span class="n">proxy</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10000</span> <span class="mi">10001</span>
+</pre></div>
+</div>
+<p>なんらかのクライアント、もしくは単に <code class="docutils literal notranslate"><span class="pre">curl</span></code> コマンドを使って、プロキシから詩をダウンロードし始めましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">curl</span> <span class="n">localhost</span><span class="p">:</span><span class="mi">10000</span>
+</pre></div>
+</div>
+<p>2, 3 秒後に, クライアントか <code class="docutils literal notranslate"><span class="pre">curl</span></code> プロセス を停止させるために <code class="docutils literal notranslate"><span class="pre">Ctrl-C</span></code> を押してください。
+プロキシを実行しているターミナルで、この様な出力を確認できますね。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Fetching</span> <span class="n">poem</span> <span class="kn">from</span> <span class="nn">server.</span>
+<span class="n">Canceling</span> <span class="n">poem</span> <span class="n">download</span><span class="o">.</span>
+</pre></div>
+</div>
+<p>プロキシがハングアップするため、 <cite>slow</cite> サーバは送信するそれぞれの詩に対する出力の表示を止めた、とみるべきでしょう。
+クライアントを何回も開始と終了させて、その度にダウンロードがキャンセルされることを検証しましょう。
+しかし、詩を完全にダウンロードさせてしまえば、プロキシはその詩をキャッシュして、それ以降は即座に送り返します。</p>
+</div>
+<div class="section" id="id9">
+<h2>驚くべきことをもうひとつ<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h2>
+<p>ここまでで、発火済みの遅延オブジェクトをキャンセルしても何の影響もない、と何度か述べてきました。
+ですが、これは実際には正しくありません。
+“<a class="reference internal" href="p13.html"><span class="doc">パート13: Deferred と行こう</span></a>”で、遅延オブジェクトに追加されたコールバックとエラー用コールバックは遅延オブジェクト自身を返すかもしれない、と学びました。
+この場合は、元の (外側の) 遅延オブジェクトはコールバックチェーンの処理を停止し、内側の遅延オブジェクトが発火するのを待ちます (“<a class="reference internal" href="p13.html#figure28"><span class="std std-ref">図２８：外側と内側の遅延オブジェクトの処理の進み方</span></a>”を見てください)。</p>
+<p>したがって、コールバックチェーンは内側の遅延オブジェクトが終わるのを待った状態で停止させられますから、遅延オブジェクトが高レベルのコードを発火させたにも関わらず、作成した非同期リクエストは結果をまだ受け取っていないかもしれません。
+そこで、高レベルのコードがその外側の遅延オブジェクトをキャンセルしたら何が起きるでしょうか？
+この場合は、外側の遅延オブジェクトは自分自身をキャンセルしません (結局、発火済みですから)。
+その代わりに、外側の遅延オブジェクトは内側の遅延オブジェクトをキャンセルします。</p>
+<p>遅延オブジェクトをキャンセルするときに、メインの非同期操作をキャンセルしていないかもしれません。
+それよりむしろ、一番最初の結果として他の何らかの非同期操作を引き起こしたかもしれません。
+ヒュー！</p>
+<p>もうひとつの例でこれを具体化しましょう。
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-cancel/defer-cancel-12.py#L1">deferred-cancel/defer-cancel-12.py</a> にあるコードについて考えます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">cancel_outer</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s2">&quot;outer cancel callback.&quot;</span>
+
+<span class="k">def</span> <span class="nf">cancel_inner</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s2">&quot;inner cancel callback.&quot;</span>
+
+<span class="k">def</span> <span class="nf">first_outer_callback</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;first outer callback, returning inner deferred&#39;</span>
+    <span class="k">return</span> <span class="n">inner_d</span>
+
+<span class="k">def</span> <span class="nf">second_outer_callback</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;second outer callback got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="k">def</span> <span class="nf">outer_errback</span><span class="p">(</span><span class="n">err</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;outer errback got:&#39;</span><span class="p">,</span> <span class="n">err</span>
+
+<span class="n">outer_d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">(</span><span class="n">cancel_outer</span><span class="p">)</span>
+<span class="n">inner_d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">(</span><span class="n">cancel_inner</span><span class="p">)</span>
+
+<span class="n">outer_d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">first_outer_callback</span><span class="p">)</span>
+<span class="n">outer_d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">second_outer_callback</span><span class="p">,</span> <span class="n">outer_errback</span><span class="p">)</span>
+
+<span class="n">outer_d</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;result&#39;</span><span class="p">)</span>
+
+<span class="c1"># at this point the outer deferred has fired, but is paused</span>
+<span class="c1"># on the inner deferred.</span>
+
+<span class="nb">print</span> <span class="s1">&#39;canceling outer deferred.&#39;</span>
+<span class="n">outer_d</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+
+<span class="nb">print</span> <span class="s1">&#39;done&#39;</span>
+</pre></div>
+</div>
+<p>この例ではふたつの遅延オブジェクト、 <code class="docutils literal notranslate"><span class="pre">outer_d</span></code> と <code class="docutils literal notranslate"><span class="pre">inner_d</span></code> 、を生成し、外側のコールバックのひとつは <code class="docutils literal notranslate"><span class="pre">inner_d</span></code> を返します。
+最初に <code class="docutils literal notranslate"><span class="pre">outer_d</span></code> を発火させ、すぐにキャンセルします。
+このサンプルコードの出力は次のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>first outer callback, returning inner deferred
+canceling outer deferred.
+inner cancel callback.
+outer errback got: [Failure instance: Traceback (failure with no frames): &lt;class &#39;twisted.internet.defer.CancelledError&#39;&gt;:]
+done
+</pre></div>
+</div>
+<p>お分かりのように、外側の遅延オブジェクトをキャンセルしても、外側の遅延オブジェクトのキャンセルコールバックを発火させることにはつながりません。
+そうではなく、内側の遅延オブジェクトのキャンセルコールバックを発火させますので、外側のエラー用コールバックは <code class="docutils literal notranslate"><span class="pre">CancelledError</span></code> を受け取ります (内側の遅延オブジェクトから)。</p>
+<p>しばらくはこのコードを眺めて、いくつかの異なることが結果にどのような影響を与えるかを実験してみてください。</p>
+</div>
+<div class="section" id="id10">
+<h2>議論<a class="headerlink" href="#id10" title="Permalink to this headline">¶</a></h2>
+<p>遅延オブジェクトのキャンセルは、必要なくなった処理を回避できますので、非常に便利な操作になりえます。
+一方でここまでで見てきたように、少しトリッキーともいえます。</p>
+<p>心に留めておくべき重要なこととして、遅延オブジェクトをキャンセルしても必ずしも低レベルの非同期操作もキャンセルするわけではない、ということが挙げられます。
+実際、この記事を書いている時点では、ほとんどの遅延オブジェクトが実際には “cancel” しません。
+たいていの Twisted のコードは Twisted 10.1.0 より以前に記述されており、まだ更新が追いついていないからです。
+Twisted 自体のたくさんの API も含まれいますよ！
+遅延オブジェクトのキャンセルが本当にリクエストをキャンセルするか、それとも単に無視するのかを判別するために、ドキュメントとソースコードを確認してください。</p>
+<p>重要なことの二つ目は、非同期 API から単純に遅延オブジェクトを返しても、文字通り完全にはキャンセル可能にはならない、ということです。
+自分自身のプログラムでキャンセル処理を実装したいときは、さらなる例を求めて Twisted のソースコードを学ぶべきです。
+キャンセル処理はまったく新しい機能ですから、パターンやベストプラクティスは今なお追及されています。</p>
+</div>
+<div class="section" id="id11">
+<h2>次は<a class="headerlink" href="#id11" title="Permalink to this headline">¶</a></h2>
+<p>これで <cite>Deferreds</cite> に関するすべてのことと、Twisted の背後にある主要なコンセプトを学びました。
+つまり、紹介すべきことはこれ以上にそうそうありません。
+Twisted の残りの部分は、Web プログラミングや非同期なデータベース接続のような、特定のアプリケーションを構築するためのものです。
+ということで次の”<a class="reference internal" href="p20.html"><span class="doc">パート20: 車輪の中の車輪: Twisted と Erlang</span></a>”では、ちょっと回り道をして、非同期 I/O を使う他のふたつのシステムにも目を向けてみましょう。
+Twisted における考え方と、それらの考え方にどのような関係があるのでしょう。
+それが終わったら最後のパートで今までのまとめをして、Twisted の学習を続けるに当たってのお勧めの方法を考えましょう。</p>
+<div class="section" id="id12">
+<h3>おすすめの練習問題<a class="headerlink" href="#id12" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>“canceled” の綴りがふたつ以上あることをご存知でしたか？
+<a class="reference external" href="http://mw4.m-w.com/dictionary/canceled">本当です</a> 。
+あなたの気分次第なのです。</p></li>
+<li><p>キャンセルの実装に格別の注意を払いながら、 <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#L167">Deferred</a> クラスのソースコードを熟読しましょう。</p></li>
+<li><p>コールバックをキャンセルする遅延オブジェクトの例を Twisted 10.10 の <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/">ソースコード</a> から探し、
+実装を学んでください。</p></li>
+<li><p>詩のクライアントのひとつの <code class="docutils literal notranslate"><span class="pre">get_poetry</span></code> メソッドの戻り値である遅延オブジェクトを、キャンセルできるようにしてください。</p></li>
+<li><p>reactor ベースのコード例を、内側の遅延オブジェクトで停止された外側の遅延オブジェクトをキャンセルするようにしてください。
+<code class="docutils literal notranslate"><span class="pre">callLater</span></code> を使うと、外側の遅延オブジェクトが即座にキャンセルされること保証するために、注意深く <cite>delays</cite> を選択する必要があります。</p></li>
+<li><p>Twisted の中で、本当のキャンセルをサポートしていない非同期 API を見つけて、それにキャンセルを実装してください。
+できたら Twisted プロジェクトに <a class="reference external" href="http://twistedmatrix.com/trac/wiki/BasicGuideToContributingCode">パッチを送ってください</a> 。
+ユニットテストも忘れずに！</p></li>
+</ul>
+</div>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p18.html">パート18: Deferreds En Masse</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p20.html">パート20: 車輪の中の車輪: Twisted と Erlang</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

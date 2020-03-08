@@ -1,0 +1,407 @@
+======================
+パート10: 変換された詩
+======================
+
+クライアント 5.0
+----------------
+それでは、":doc:`p09`" で提案してきたような方向性で、これまで作ってきた詩のクライアントにいくつかの変換ロジックを付け足していきましょう。
+しかしまずは、恥ずかしながら告白しておくことがあります。
+私は Byronification Engine を記述する術を知りません。
+これは私のプログラミングスキルの範疇を超えています。
+代わりに、Cummingsifier という、もう少し簡単な変換を実装していくことにしましょう。
+Cummingsifier は、詩を受け取って、元の詩に似てはいるものの `e.e.cummings`_ 形式で書かれた新しい詩を返すアルゴリズムです。
+Cummingsifier アルゴリズムの全てをここに示しましょう。
+
+.. _e.e.cummings: http://en.wikipedia.org/wiki/E._E._Cummings
+
+::
+
+    def cummingsify(poem):
+        return poem.lower()
+
+不幸なことに、このアルゴリズムはとても簡単なので決して失敗することがありません。
+そこでクライアント 5.0 (`twisted-client-5/get-poetry.py`_ にあります) では、次のうちのいずれかを無作為に実行するように ``cummingsify`` を少し変更したバージョンを使うことにします。
+
+.. _twisted-client-5/get-poetry.py: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry.py#L1
+
+#. cummingsified されたバージョンの詩を返します。
+#. ``GibberishError`` を送出します。
+#. ``ValueError`` を送出します。
+
+このようにして、予期せぬ方法で時々失敗するアルゴリズムをシミュレートします。
+
+クライアント 5.0 におけるその他の違いは `poetry_main`_ 関数にのみあります。
+
+.. _poetry main: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry.py#L119
+
+::
+
+    def poetry_main():
+        addresses = parse_args()
+
+        from twisted.internet import reactor
+
+        poems = []
+        errors = []
+
+        def try_to_cummingsify(poem):
+            try:
+                return cummingsify(poem)
+            except GibberishError:
+                raise
+            except:
+                print 'Cummingsify failed!'
+                return poem
+
+        def got_poem(poem):
+            print poem
+            poems.append(poem)
+
+        def poem_failed(err):
+            print >>sys.stderr, 'The poem download failed.'
+            errors.append(err)
+
+        def poem_done(_):
+            if len(poems) + len(errors) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            d = get_poetry(host, port)
+            d.addCallback(try_to_cummingsify)
+            d.addCallbacks(got_poem, poem_failed)
+            d.addBoth(poem_done)
+
+        reactor.run()
+
+プログラムがサーバから詩をダウンロードすると、次のいずれかが起こります。
+
+#. cummingsified バージョン (小文字に変換されたもの) の詩を出力します。
+#. 元々の詩の後に "Cummingsify failed!" と出力します。
+#. "The poem download failed." と出力します。
+
+私たちは複数のサーバからダウンロードできるようになりましたが、三つの異なる結果を全て見るまで、クライアント 5.0 をテストしてみるときはひとつのサーバを使ってプログラムを何度も実行するだけの方が簡単でしょう。
+また、サーバが存在しないポートに対してクライアントを実行させてみてください。
+
+``get_poetry`` から得られたそれぞれの ``Deferred`` に付け足したコールバックとエラー用コールバックのチェーンを図にしてみましょう。
+
+.. _figure19:
+
+.. figure:: images/p10_deferred-42.png
+
+    図１９：クライアント 5.0 における遅延オブジェクトの連鎖
+
+``addCallback`` によって付け加えられた何もしないエラー用コールバック (pass-through errback) に注意してください。
+これは、受け取った ``Failure`` が何であろうとも次のエラー用コールバック (``poem_failed``) にそれを渡します。
+このため `poem_failed`` は、 ``get_poetry`` (つまり、遅延オブジェクトは ``errback`` メソッドで発火させられます) と ``cummingsify`` 関数の両方から投げられたエラーを扱うことができます。
+
+図19 において
+Inkscape_
+
+.. _Inkscape: http://inkscape.org/
+
+``cummingsify`` 関数がきちんと動くのは図20に示します。
+
+.. _figure20:
+
+.. figure:: images/p10_deferred-5.png
+
+    図２０：詩をダウンロードして正確に変換するとき
+
+図21は、詩を受信したものの ``cummingsify`` が ``GibberishError`` を送出する場合を表します。
+
+.. _figure21:
+
+.. figure:: images/p10_deferred-6.png
+
+    図２１：詩をダウンロードして GibberishError が出るとき
+
+``try_to_cummingsify`` コールバックは ``GibberishError`` を再度発生させますので、制御がエラー用コールバックに移り ``poem_failed`` は引数として例外を受け取って呼び出されます。(その引数はもちろん ``Failure`` でラップされています)
+
+そして ``poem_failed`` は 例外を発生させないかあるいは ``Failure`` を返しますので、呼び出し終えると制御は通常のコールバックに戻ります。
+もしも ``poem_failed`` にエラーを完全に処理して欲しければ、 ``None`` を返すことが妥当な振る舞いです。
+そうではなく ``poem_failed`` に何かをやってほしければ、しかしそれでもなおエラーを受け渡しながらであれば、 ``poem_failed`` がその ``err`` 引数を返し、処理はエラー用コールバックにいくでしょう。
+
+今のコードでは ``got_poem`` と ``poem_failed`` のどちらも失敗しないことに気をつけてください。このため ``poem_done`` というエラー用コールバックは決して呼び出されません。
+しかし、いかなる場合でもこの段階を踏むことは安全であり、 ``got_poem`` か ``poem_failed`` のどちらかに私たちが知らないバグがあるかもしれませんので、防御的プログラミング ("defensive" programming) を体現します。
+``addBoth`` メソッドは、遅延オブジェクトをどのように発火しようとも特定の関数が実行されることを保証しますので、 ``addBoth`` を使うことは  ``try/except`` 文に ``finally`` 句を追加することに相当します。
+
+ここでは、詩をダウンロードして ``cummingsify`` 関数が ``ValueError`` を発生させる場合を検証しましょう。図22に示します。
+
+.. _figure22:
+
+.. figure:: images/p10_deferred-7.png
+
+    図２２：詩をダウンロードして、cummingsify に失敗するとき
+
+``got_poem`` が変換されていない元のバージョンの詩を受け取る、ということを除いて、これは図20と同じです。
+この切り替えはすべて ``try_to_cummingsify`` コールバックの中で発生します。このコールバックは普通の ``try/except`` 文で ``ValueError`` を捕まえて、その代わりに元の詩を返します。
+遅延オブジェクトがエラーを見ることはありません。
+
+最後に図23で、存在しないサーバから詩をダウンロードしようとした場合を示します。
+
+.. _figure23:
+
+.. figure:: images/p10_deferred-8.png
+
+    図２３：サーバに接続できないとき
+
+前回と同じように、その後の制御が通常のコールバックに戻るように ``poem_failed`` は ``None`` を返します。
+
+クライアント 5.1
+----------------
+クライアント 5.0 では、遅延オブジェクトに最初に例外を捕まえさせるよりはむしろ、通常の ``try/except`` 文を使って ``try_to_cummingsify`` コールバックの ``cummingsify`` で例外を引っ掛けます。
+この戦略に特に悪いところはありませんが、違う方法でどうやってみるかを考えることは勉強になるでしょう。
+
+遅延オブジェクトに ``GibberishError`` と ``ValueError`` の両方の例外を捕まえさせて、それらをエラー用コールバックの流れに送る場合を考えてみましょう。
+現在の振る舞いをそのままにするために、後続するエラー用コールバックはエラーが ``ValueError`` かを確認する必要があり、もしそうなら、制御が通常のコールバックの流れに復帰して元の詩が出力されるように、そのままの詩を返すようさせます。
+
+しかし、問題がひとつあります。エラー用コールバックは元の詩を取得できません。 ``cummingsify`` 関数から送出され ``Failure`` でラップされた ``ValueError`` を受け取るのです。
+エラー用コールバックにエラーを処理させるために、このコールバックが元の詩を受け取るように工夫する必要があります。
+
+ひとつの方法は、元の詩が例外に含まれるよう ``cummingsify`` 関数を変更することです。
+これこそがクライアント 5.1 で実現したことで、 `twisted-client-5/get-poetry-1.py`_ にあります。
+``ValueError`` 例外を、第一引数で元の詩を受け取る独自の ``CannotCummingsify`` 例外に変更しました。
+
+.. _twisted-client-5/get-poetry-1.py: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L1
+
+もしも ``cummingsify`` が外部モジュールに実在する関数ならば、 ``GibberishError`` ではないすべての例外を引っ掛けて、代わりに ``CannotCummingsify`` 例外を発生させるようなもうひとつの関数でラップしてしまうことがおそらく最良の方法でしょう。 
+この新しい方法を使うと `poetry_main`_ 関数は次のようになります。
+
+.. _poetry_main: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L122
+
+::
+
+    def poetry_main():
+        addresses = parse_args()
+
+        from twisted.internet import reactor
+
+        poems = []
+        errors = []
+
+        def cummingsify_failed(err):
+            if err.check(CannotCummingsify):
+                print 'Cummingsify failed!'
+                return err.value.args[0]
+            return err
+
+        def got_poem(poem):
+            print poem
+            poems.append(poem)
+
+        def poem_failed(err):
+            print >>sys.stderr, 'The poem download failed.'
+            errors.append(err)
+
+        def poem_done(_):
+            if len(poems) + len(errors) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            d = get_poetry(host, port)
+            d.addCallback(cummingsify)
+            d.addErrback(cummingsify_failed)
+            d.addCallbacks(got_poem, poem_failed)
+            d.addBoth(poem_done)
+
+私たちが生成したそれぞれの遅延オブジェクトは、図24の構造を持ちます。
+
+.. _figure24:
+
+.. figure:: images/p10_deferred-9.png
+
+    図２４：クライアント 5.1 における遅延オブジェクトの連鎖
+
+``cummingsify_failed`` というエラー用コールバックを確認してください。
+::
+
+    def cummingsify_failed(err):
+        if err.check(CannotCummingsify):
+            print 'Cummingsify failed!'
+            return err.value.args[0]
+        return err
+
+``Failure`` に内包された例外が ``CannotCummingsify`` のインスタンスかを確認するために、 ``Failure`` オブジェクトの check_ メソッドを使っています。
+もしもそうなら、第一引数 (元の詩) を例外に返し、エラーを処理します。
+戻り値は ``Failure`` ではありませんので、制御は通常のコールバックの流れに戻ります。
+そうでなければ ``Failure`` 自身を返し、エラーを送って (re-raise) エラー用コールバックの流れに落とし込みます。
+お分かりのように、例外は ``Failure`` の ``value`` 属性で参照できます。
+
+.. _check: http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L305
+
+図25は ``CannotCummingsify`` 例外を受け取ったときに発生することを表します。
+
+.. _figure25:
+
+.. figure:: images/p10_deferred-10.png
+
+    図２５：CannotCummigsify エラーが発生するとき
+
+ということで、遅延オブジェクトを使うときは、例外を処理するために ``try/except`` を使うようにするか、遅延オブジェクトにエラーをエラー用コールバックに再度送らせるかのどちらかを選択できます。
+
+まとめ
+------
+パート10では、エラーを誘導してチェーンを辿らせる ``Deferred`` の力を使って詩のクライアントを更新しました。
+使った例はいくぶん実用的ではありませんが、遅延オブジェクトにおける制御フローがそれぞれのステージの結果によって通常のコールバックとエラー用コールバックを行き来する様子を描き出せていると思います。
+
+さあ、これで遅延オブジェクトに関して知っておくべきことは全て身に着けましたか？
+いえ、まだです！
+今後のパートでも遅延オブジェクトの更なる機能を探求していきましょう。
+とはいえ":doc:`p11`"ではちょっと趣向を変えて、Twisted を使って詩のサーバを実装するとしましょう。
+
+おすすめの練習問題
+------------------
+#. 図25は、クライアント 5.1 における遅延オブジェクトが発火する４つの可能性のうちのひとつを表しています。
+   他の３つを書き出してみてください。
+#. `deferred simulator`_ を使って、クライアント 5.0 と 5.1 が発火する様子をシミュレートしてみましょう。
+   手始めに、このシミュレータプログラムは次のようにして、クライアント 5.0 における ``try_to_cummingsify`` 関数が成功する様子を表現できます。
+   ::
+
+        r poem p
+        r None r None
+        r None r None
+
+.. _deferred simulator: http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/deferred-simulator.py#L1
+
+..
+    <H2>Part 10: Poetry Transformed
+    This continues the introduction started <A href="http://krondo.com/blog/?p=1209">here</A>. You can find an index to the entire series <A href="http://krondo.com/blog/?page_id=1327">here</A>.
+    <H3>Client 5.0
+    Now we're going to add some transformation logic to our poetry client, along the lines suggested in <A href="http://krondo.com/blog/?p=1825">Part 9</A>. But first, I have a shameful and humbling confession to make: I don't know how to write the Byronification Engine. It is beyond my programming abilities. So instead, I'm going to implement a simpler transformation, the Cummingsifier. The Cummingsifier is an algorithm that takes a poem and returns a new poem like the original but written in the style of <A href="http://en.wikipedia.org/wiki/E._E._Cummings">e.e. cummings</A>. Here is the Cummingsifier algorithm in its entirety:
+    def cummingsify(poem)
+        return poem.lower()
+    Unfortunately, this algorithm is so simple it never actually fails, so in client 5.0, located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry.py#L1"><TT>twisted-client-5/get-poetry.py</TT></A>, we use a modified version of <CODE>cummingsify</CODE> that randomly does one of the following:
+    <OL>
+    * Return a cummingsified version of the poem.
+    * Raise a GibberishError.
+    * Raise a ValueError.
+    </OL>
+    In this way we simulate a more complicated algorithm that sometimes fails in unexpected ways.
+    The only other changes in client 5.0 are in the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry.py#L119"><CODE>poetry_main</CODE></A> function:
+    def poetry_main():
+        addresses = parse_args()
+
+        from twisted.internet import reactor
+
+        poems = []
+        errors = []
+
+        def try_to_cummingsify(poem):
+            try:
+                return cummingsify(poem)
+            except GibberishError:
+                raise
+            except:
+                print 'Cummingsify failed!'
+                return poem
+
+        def got_poem(poem):
+            print poem
+            poems.append(poem)
+
+        def poem_failed(err):
+            print &gt;&gt;sys.stderr, 'The poem download failed.'
+            errors.append(err)
+
+        def poem_done(_):
+            if len(poems) + len(errors) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            d = get_poetry(host, port)
+            d.addCallback(try_to_cummingsify)
+            d.addCallbacks(got_poem, poem_failed)
+            d.addBoth(poem_done)
+
+        reactor.run()
+    So when the program downloads a poem from the server, it will either:
+    <OL>
+    * Print the cummingsified (lower-cased) version of the poem.
+    * Print "Cummingsify failed!" followed by the original poem.
+    * Print "The poem download failed."
+    </OL>
+    Although we have retained the ability to download from multiple servers, when you are testing out client 5.0 it's easier to just use a single server and run the program multiple times, until you see all three different outcomes. Also try running the client on a port with no server.
+    Let's draw the callback/errback chain we create on each <CODE>Deferred</CODE> we get back from <CODE>get_poetry</CODE>:
+    <DIV id="attachment_1987" class="wp-caption aligncenter" style="width: 589px"><A href="./part10_files/deferred-42.png"><IMG class="size-full wp-image-1987" title="Figure 19: the deferred chain in client 5.0" src="./part10_files/deferred-42.png" alt="Figure 19: the deferred chain in client 5.0" width="579" height="348"></A><P class="wp-caption-text">Figure 19: the deferred chain in client 5.0</DIV>
+    Note the pass-through errback that gets added by <CODE>addCallback</CODE>. It passes whatever <CODE>Failure</CODE> it receives onto the next errback (<CODE>poem_failed</CODE>). Thus, <CODE>poem_failed</CODE> can handle failures from both <CODE>get_poetry</CODE> (i.e., the deferred is fired with the <CODE>errback</CODE> method) and the <CODE>cummingsify</CODE> function.
+    Also note the hauntingly beautiful drop-shadow around the border of the deferred in Figure 19. It doesn't signify anything other than me discovering how to do it in <A href="http://inkscape.org/">Inkscape</A>. Expect more drop-shadows in the future.
+    Let's analyze the different ways our deferred can fire. The case where we get a poem and the <CODE>cummingsify</CODE> function works correctly is shown in Figure 20:
+    <DIV id="attachment_1970" class="wp-caption aligncenter" style="width: 570px"><A href="./part10_files/deferred-5.png"><IMG class="size-full wp-image-1970" title="Figure 20: when we download a poem and transform it correctly" src="./part10_files/deferred-5.png" alt="Figure 20: when we download a poem and transform it correctly" width="560" height="348"></A><P class="wp-caption-text">Figure 20: when we download a poem and transform it correctly</DIV>
+    In this case no callback fails, so control flows down the callback line. Note that <CODE>poem_done</CODE> receives <CODE>None</CODE> as its result, since <CODE>got_poem</CODE> doesn't actually <CODE>return</CODE> a value. If we wanted subsequent callbacks to have access to the poem, we would modify <CODE>got_poem</CODE> to return the poem explicitly.
+    Figure 21 shows the case where we get a poem, but <CODE>cummingsify</CODE> raises a GibberishError:
+    <DIV id="attachment_1973" class="wp-caption aligncenter" style="width: 570px"><A href="./part10_files/deferred-6.png"><IMG class="size-full wp-image-1973" title="Figure 21: when we download a poem and get a GibberishError" src="./part10_files/deferred-6.png" alt="Figure 21: when we download a poem and get a GibberishError" width="560" height="348"></A><P class="wp-caption-text">Figure 21: when we download a poem and get a GibberishError</DIV>
+    Since the <CODE>try_to_cummingsify</CODE> callback re-raises a <CODE>GibberishError</CODE>, control switches to the errback line and <CODE>poem_failed</CODE> is called with the exception as its argument (wrapped in a <CODE>Failure</CODE>, of course).
+    And since <CODE>poem_failed</CODE> doesn't raise an exception, or return a <CODE>Failure</CODE>, after it is done control switches back to the callback line. If we want <CODE>poem_failed</CODE> to handle the error completely, then returning <CODE>None</CODE> is a reasonable behavior. On the other hand, if we wanted <CODE>poem_failed</CODE> to take some action, but still propagate the error, we could change <CODE>poem_failed</CODE> to return its <CODE>err</CODE> argument and processing would continue down the errback line.
+    Note that in the current code neither <CODE>got_poem</CODE> nor <CODE>poem_failed</CODE> ever fail themselves, so the <CODE>poem_done</CODE> errback will never be called. But it's safe to add it in any case and doing so represents an instance of "defensive" programming, as either <CODE>got_poem</CODE> or <CODE>poem_failed</CODE> might have bugs we don't know about. Since the <CODE>addBoth</CODE> method ensures that a particular function will run no matter how the deferred fires, using <CODE>addBoth</CODE> is analogous to adding a <CODE>finally</CODE> clause to a <CODE>try</CODE>/<CODE>except</CODE> statement.
+    Now examine the case where we download a poem and the <CODE>cummingsify</CODE> function raises a <CODE>ValueError</CODE>, displayed in Figure 22:
+    <DIV id="attachment_1980" class="wp-caption aligncenter" style="width: 570px"><A href="./part10_files/deferred-7.png"><IMG class="size-full wp-image-1980" title="Figure 22: when we download a poem and cummingsify fails" src="./part10_files/deferred-7.png" alt="Figure 22: when we download a poem and cummingsify fails" width="560" height="348"></A><P class="wp-caption-text">Figure 22: when we download a poem and cummingsify fails</DIV>
+    This is the same as figure 20, except <CODE>got_poem</CODE> receives the original version of the poem instead of the transformed version. The switch happens entirely inside the <CODE>try_to_cummingsify</CODE> callback, which traps the <CODE>ValueError</CODE> with an ordinary <CODE>try</CODE>/<CODE>except</CODE> statement and returns the original poem instead. The deferred object never sees that error at all.
+    Lastly, we show the case where we try to download a poem from a non-existent server in Figure 23:
+    <DIV id="attachment_1983" class="wp-caption aligncenter" style="width: 570px"><A href="./part10_files/deferred-8.png"><IMG class="size-full wp-image-1983" title="Figure 23: when we cannot connect to a server" src="./part10_files/deferred-8.png" alt="Figure 23: when we cannot connect to a server" width="560" height="348"></A><P class="wp-caption-text">Figure 23: when we cannot connect to a server</DIV>
+    As before, <CODE>poem_failed</CODE> returns <CODE>None</CODE> so afterwards control switches to the callback line.
+    <H3>Client 5.1
+    In client 5.0 we are trapping exceptions from <CODE>cummingsify</CODE> in our <CODE>try_to_cummingsify</CODE> callback using an ordinary <CODE>try</CODE>/<CODE>except</CODE> statement, rather than letting the deferred catch them first. There isn't necessarily anything wrong with this strategy, but it's instructive to see how we might do this differently.
+    Let's suppose we wanted to let the deferred catch both <CODE>GibberishError</CODE> and <CODE>ValueError</CODE> exceptions and send them to the errback line. To preserve the current behavior our subsequent errback needs to check to see if the error is a <CODE>ValueError</CODE> and, if so, handle it by returning the original poem, so that control goes back to the callback line and the original poem gets printed out.
+    But there's a problem: the errback wouldn't get the original poem, it would get the <CODE>Failure</CODE>-wrapped <CODE>ValueError</CODE> raised by the <CODE>cummingsify</CODE> function. To let the errback handle the error, we need to arrange for it to receive the original poem.
+    One way to do that is to modify the <CODE>cummingsify</CODE> function so the original poem is included in the exception. That's what we've done in client 5.1, located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L1"><TT>twisted-client-5/get-poetry-1.py</TT></A>. We changed the <CODE>ValueError</CODE> exception into a custom <CODE>CannotCummingsify</CODE> exception which takes the original poem as the first argument.
+    If <CODE>cummingsify</CODE> were a real function in an external module, then it would probably be best to wrap it with another function that trapped any exception that wasn't <CODE>GibberishError</CODE> and raise a <CODE>CannotCummingsify</CODE> exception instead. With this new setup, our <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-5/get-poetry-1.py#L122"><CODE>poetry_main</CODE></A> function looks like this:
+    def poetry_main():
+        addresses = parse_args()
+
+        from twisted.internet import reactor
+
+        poems = []
+        errors = []
+
+        def cummingsify_failed(err):
+            if err.check(CannotCummingsify):
+                print 'Cummingsify failed!'
+                return err.value.args[0]
+            return err
+
+        def got_poem(poem):
+            print poem
+            poems.append(poem)
+
+        def poem_failed(err):
+            print &gt;&gt;sys.stderr, 'The poem download failed.'
+            errors.append(err)
+
+        def poem_done(_):
+            if len(poems) + len(errors) == len(addresses):
+                reactor.stop()
+
+        for address in addresses:
+            host, port = address
+            d = get_poetry(host, port)
+            d.addCallback(cummingsify)
+            d.addErrback(cummingsify_failed)
+            d.addCallbacks(got_poem, poem_failed)
+            d.addBoth(poem_done)
+    And each deferred we create has the structure pictured in Figure 24:<A name="figure24"></A>
+    <DIV id="attachment_1992" class="wp-caption aligncenter" style="width: 485px"><A href="./part10_files/deferred-9.png"><IMG class="size-full wp-image-1992" title="Figure 24: the deferred chain in client 5.1" src="./part10_files/deferred-9.png" alt="Figure 24: the deferred chain in client 5.1" width="475" height="350"></A><P class="wp-caption-text">Figure 24: the deferred chain in client 5.1</DIV>
+    Examine the <CODE>cummingsify_failed</CODE> errback:
+        def cummingsify_failed(err):
+            if err.check(CannotCummingsify):
+                print 'Cummingsify failed!'
+                return err.value.args[0]
+            return err
+    We are using the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/failure.py#L305"><CODE>check</CODE></A> method on <CODE>Failure</CODE> objects to test whether the exception embedded in the <CODE>Failure</CODE> is an instance of <CODE>CannotCummingsify</CODE>. If so, we return the first argument to the exception (the original poem) and thus handle the error. Since the return value is not a <CODE>Failure</CODE>, control returns to the callback line. Otherwise, we return the <CODE>Failure</CODE> itself and send (re-raise) the error down the errback line. As you can see, the exception is available as the <CODE>value</CODE> attribute on the <CODE>Failure</CODE>.
+    Figure 25 shows what happens when we get a <CODE>CannotCummingsify</CODE> exception:
+    <DIV id="attachment_2002" class="wp-caption aligncenter" style="width: 571px"><A href="./part10_files/deferred-10.png"><IMG class="size-full wp-image-2002" title="Figure 25: when we get a CannotCummingsify error" src="./part10_files/deferred-10.png" alt="Figure 25: when we get a CannotCummingsify error" width="561" height="452"></A><P class="wp-caption-text">Figure 25: when we get a CannotCummingsify error</DIV>
+    So when we are using a deferred, we can sometimes choose whether we want to use <CODE>try</CODE>/<CODE>except</CODE> statements to handle exceptions, or let the deferred re-route errors to an errback.
+    <H3>Summary
+    In Part 10 we updated our poetry client to make use of the <CODE>Deferred</CODE>'s ability to route errors and results down the chain. Although the example was rather artificial, it did illustrate how control flow in a deferred switches back and forth between the callback and errback line depending on the result of each stage.
+    So now we know everything there is to know about deferreds, right? Not yet! We're going to explore some more features of deferreds in a future Part. But first we'll take a little detour and, in <A href="http://krondo.com/blog/?p=2048">Part 11</A>, implement a Twisted version of our poetry server.
+    <H3>Suggested Exercises
+    <OL>
+    * Figure 25 shows one of the four possible ways the deferreds in client 5.1 can fire. Draw the other three.
+    * Use the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/deferred-simulator.py#L1">deferred simulator</A> to simulate all possible firings for clients 5.0 and 5.1. To get you started, this simulator program can represent the case where the <CODE>try_to_cummingsify</CODE> function succeeds in client 5.0:
+    r poem p
+    r None r None
+    r None r None
+    
+    </OL>

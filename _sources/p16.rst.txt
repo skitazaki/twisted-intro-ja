@@ -1,0 +1,1062 @@
+==================================
+パート16: Twisted をデーモン化する
+==================================
+..
+    <H2>Part 16: Twisted Daemonologie
+
+はじめに
+========
+..
+    <H3>Introduction
+
+これまで私たちが記述してきたサーバは、 ``print`` 文で画面に出力し、ターミナルウィンドウ内で動くだけでした。
+開発版ではこれでも構いませんが、製品版としてサービスを配備することからは程遠い方法です。
+お行儀の良いサーバ製品は次のようにあるできでしょう。
+
+#. ターミナルやユーザセッションと関連付くことなく、 `daemon <http://en.wikipedia.org/wiki/Daemon_%28computer_software%29>`_ プロセスとして動きます。
+   管理者がログアウトしただけでサービスを終了させたくはないでしょうね。
+#. デバッグとエラー出力をローテートするログファイル一式か `syslog <http://en.wikipedia.org/wiki/Syslog>`_ に送ります。
+#. 余分な権限をそぎ落とします。たとえば、実行前に権限の低いユーザに切り替えるなどです。
+#. 管理者が簡単にデーモンへ `シグナルを送信 <http://en.wikipedia.org/wiki/Kill%28%29>`_ できるように、
+   ファイルに `pid <http://en.wikipedia.org/wiki/Process_ID>`_ を記録します。
+
+..
+    The servers we have written so far have just run in a terminal window, with output going to the screen via <CODE>print</CODE> statements. This works alright for development, but it's hardly a way to deploy services in production. A well-behaved production server ought to:
+    <OL>
+    * Run as a <A href="http://en.wikipedia.org/wiki/Daemon_%28computer_software%29">daemon</A> process, unconnected with any terminal or user session. You don't want a service to shut down just because the administrator logs out.
+    * Send debugging and error output to a set of rotated log files, or to the <A href="http://en.wikipedia.org/wiki/Syslog"><TT>syslog</TT></A> service.
+    * Drop excessive privileges, e.g., switching to a lower-privileged user before running.
+    * Record its <A href="http://en.wikipedia.org/wiki/Process_ID"><TT>pid</TT></A> in a file so that the administrator can easily <A href="http://en.wikipedia.org/wiki/Kill%28%29">send signals</A> to the daemon.
+    </OL>
+
+Twisted が提供する `twistd` スクリプトを使うと、これら全ての機能を手に入れることができます。
+しかしまずは、私たちのコードに手を加える必要があります。
+
+..
+    We can get all of those features by using the <TT>twistd</TT> script provided by Twisted. But first we'll have to change our code a bit.
+
+コンセプト
+==========
+..
+    <H3>The Concepts
+
+`twistd` を理解するには、Twisted におけるいくつかのコンセプトを学習する必要があります。
+もっとも大事なのは ``Service`` です。
+これまでと同じように、新しいコンセプトには新しい ``Interface`` がつきものです。
+
+..
+    Understanding <TT>twistd</TT> will require learning a few new concepts in Twisted, the most important being a <CODE>Service</CODE>. As usual, several of the new concepts are accompanied by new <CODE>Interface</CODE>s.
+
+IService
+--------
+..
+    <H4>IService
+
+`IService <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L87>`_ インターフェイスは開始と停止が可能な名前付きのサービスを定義します。
+サービスとは何をするものなのでしょう？
+何でも良いのです。
+サービスの特定の関数を定義するのではなく、インターフェイスは汎用的な属性とメソッドの一式を提供する何かを要求するだけです。
+
+..
+    The <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L87"><CODE>IService</CODE></A> interface defines a named service that can be started and stopped. What does the service do? Whatever you like — rather than define the specific function of the service, the interface requires only that it provide a small set of generic attributes and methods.
+
+ふたつの必須属性があります。 ``name`` と ``running`` です。
+``name`` 属性は、 "`fastpoetry`" のような、単なる文字列です。
+``running`` 属性は真偽値で、サービスが問題なく開始したときは ``True`` になります。
+
+..
+    There are two required attributes: <CODE>name</CODE> and <CODE>running</CODE>. The <CODE>name</CODE> attribute is just a string, like <CODE>'fastpoetry'</CODE>. The <CODE>running</CODE> attribute is a Boolean value and is true if the service has been successfully started.
+
+``IService`` のいくつかのメソッドに触れてみましょう。
+明らかなものはスキップするとして、より上級者向けや簡単な Twisted プログラムではあまり使われないものを見てみましょう。
+``IService`` の根幹を成すふたつのメソッドは `startService
+<http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L130>`_ と
+`stopService <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L135>`_ です。
+::
+
+        def startService():
+            """
+            Start the service.
+            """
+
+        def stopService():
+            """
+            Stop the service.
+
+            @rtype: L{Deferred}
+            @return: a L{Deferred} which is triggered when the service has
+                finished shutting down. If shutting down is immediate, a
+                value can be returned (usually, C{None}).
+            """
+
+..
+    We're only going to touch on some of the methods of <CODE>IService</CODE>. We'll skip some that are obvious, and others that are more advanced and often go unused in simpler Twisted programs. The two principle methods of <CODE>IService</CODE> are <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L130"><CODE>startService</CODE></A> and <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L135"><CODE>stopService</CODE></A>:
+        def startService():
+            """
+            Start the service.
+            """
+
+        def stopService():
+            """
+            Stop the service.
+
+            @rtype: L{Deferred}
+            @return: a L{Deferred} which is triggered when the service has
+                finished shutting down. If shutting down is immediate, a
+                value can be returned (usually, C{None}).
+            """
+
+さて、これらのメソッドの実際の動作は、対象となるサービスに依存するでしょう。
+たとえば、 ``startService`` メソッドは次のことを行うかもしれません。
+
+* 設定情報を読み込みます。もしくは、
+* データベースを初期化します。もしくは、
+* ポートを待ち受け始めます。もしくは、
+* まったく何もしません。
+
+..
+    Again, what these methods actually do will depend on the service in question. For example, the <CODE>startService</CODE> method might:
+    <UL>
+    * Load some configuration data, or
+    * Initialize a database, or
+    * Start listening on a port, or
+    * Do nothing at all.
+    </UL>
+
+そして ``stopService`` には次の可能性があります。
+
+* データを永続化します。もしくは、
+* 有効なデータベース接続を閉じます。もしくは、
+* ポートで待ち受けるのを止めます。もしくは、
+* まったく何もしません。
+
+..
+    And the <CODE>stopService</CODE> method might:
+    <UL>
+    * Persist some state, or
+    * Close open database connections, or
+    * Stop listening on a port, or
+    * Do nothing at all.
+    </UL>
+
+カスタムサービスを記述するときは、これらのメソッドを正確に実装する必要があります。
+しかし、ポートを待ち受けるようないくつかの共通する振る舞いには、私たちが利用できるサービスを Twisted が提供してくれます。
+
+``stopService`` は遅延オブジェクトを返すかもしれないことに気をつけてください。
+これは、サービスが完全に停止したら発火するために必要とされます。
+これにより、アプリケーション全体が停止する前に、サービス停止後に自分自身のクリーンナップが終了できるようにします。
+サービスがすぐさまに停止するなら、遅延オブジェクトの替わりに単に ``None`` を返せば良いでしょう。
+
+..
+    When we write our own custom services we'll need to implement these methods appropriately. For some common behaviors, like listening on a port, Twisted provides ready-made services we can use instead.
+    Notice that <CODE>stopService</CODE> may optionally return a deferred, which is required to fire when the service has completely shut down. This allows our services to finish cleaning up after themselves before the entire application terminates. If your service shuts down immediately you can just return <CODE>None</CODE> instead of a deferred.
+
+サービスは、一緒に開始および終了されるような集合として構成されます。
+ここで見ておく最後の ``IService`` メソッドは `setServiceParent 
+<http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L107>`_ で、
+これはサービスを集合に追加します。
+::
+
+        def setServiceParent(parent):
+            """
+            Set the parent of the service.
+
+            @type parent: L{IServiceCollection}
+            @raise RuntimeError: Raised if the service already has a parent
+                or if the service has a name and the parent already has a child
+                by that name.
+            """
+
+..
+    Services can be organized into collections that get started and stopped together. The last <CODE>IService</CODE> method we're going to look at, <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L107"><CODE>setServiceParent</CODE></A>, adds a Service to a collection:
+        def setServiceParent(parent):
+            """
+            Set the parent of the service.
+
+            @type parent: L{IServiceCollection}
+            @raise RuntimeError: Raised if the service already has a parent
+                or if the service has a name and the parent already has a child
+                by that name.
+            """
+
+いかなるサービスも親を持つことができます。
+これはサービスが階層構造を持って構成されることを意味します。
+そして、次に見ていく `Interface` をもたらします。
+
+..
+    Any service can have a parent, which means services can be organized in a hierarchy. And that brings us to the next <CODE>Interface</CODE> we're going to look at today.
+
+IServiceCollection
+------------------
+..
+    <H4>IServiceCollection
+
+`IServiceCollection <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L203>`_
+インターフェイスは ``IService`` オブジェクトを包含可能なオブジェクトを定義します。
+サービスの集合は、以下のメソッドを持つ単なるコンテナクラスなのです。
+
+* 名前からサービスを探し出します。 (`getServiceNamed <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L212>`_)
+* 集合に含まれるサービスに対して繰り返します。 (`__iter__ <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L222>`_)
+* 集合にサービスを追加します。 (`addService <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L227>`_)
+* 集合からサービスを取り除きます。 (`removeService <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L236>`_)
+
+..
+    The <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L203"><CODE>IServiceCollection</CODE></A> interface defines an object which can contain <CODE>IService</CODE> objects. A service collection is a just plain container class with methods to:
+    <UL>
+    * Look up a service by name (<A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L212"><CODE>getServiceNamed</CODE></A>)
+    * Iterate over the services in the collection (<A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L222"><CODE>__iter__</CODE></A>)
+    * Add a service to the collection (<A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L227"><CODE>addService</CODE></A>)
+    * Remove a service from the collection (<A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L236"><CODE>removeService</CODE></A>)
+    </UL>
+
+``IServiceCollection`` の実装が自動的に ``IService`` の実装であるわけではないことに気をつけましょう。
+しかし、あるクラスが両方のインターフェイスを実装できない理由はありません (少し先で例を見ていきましょう) 。
+
+..
+    Note that an implementation of <CODE>IServiceCollection</CODE> isn't automatically an implementation of <CODE>IService</CODE>, but there's no reason why one class can't implement both interfaces (and we'll see an example of that shortly).
+
+Application
+-----------
+..
+    <H4>Application
+
+Twisted の ``Application`` は分離されたインターフェイスとして実装されているわけではありません。
+むしろ ``Application`` オブジェクトは、ここで取り扱う範囲外のほかのいくつかのインターフェイスと同様に、
+``IService`` と ``IServiceCollection`` の両方を実装するために必要とされます。
+
+``Application`` は、Twisted アプリケーション全体を表現するトップレベルのサービスです。
+デーモンにおける全てのサービスは ``Application`` オブジェクトの子供 (もしくは孫や子孫) になるでしょう。
+
+自分自身で ``Application`` を実際に実装することは稀です。
+私たちが使うような実装を Twisted が提供してくれます。
+
+..
+    A Twisted <CODE>Application</CODE> is not defined by a separate interface. Rather, an <CODE>Application</CODE> object is required to implement both <CODE>IService</CODE> and <CODE>IServiceCollection</CODE>, as well as a few other interfaces we aren't going to cover.
+    An <CODE>Application</CODE> is the top-level service that represents your entire Twisted application. All the other services in your daemon will be children (or grandchildren, etc.) of the <CODE>Application</CODE> object.
+    It is rare to actually implement your own <CODE>Application</CODE>. Twisted provides an implementation that we'll use today.
+
+Twisted Logging
+---------------
+..
+    <H4>Twisted Logging
+
+Twisted は `twisted.python.log <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/python/log.py>`_
+モジュールに独自のロギング方法を持ちます。
+ログを書き込む基本的な API は簡単ですので、 `basic-twisted/log.py` にある簡単な例を見せるだけにしましょう。
+興味を持ったら Twisted のモジュールをよく読んでみてください。
+
+わざわざロギングのハンドラをインストールするための API を示すことはしません。
+`twistd` がやってくれるからです。
+
+..
+    Twisted includes its own logging infrastructure in the module <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/python/log.py"><CODE>twisted.python.log</CODE></A>. The basic API for writing to the log is simple, so we'll just include a short example located in <TT>basic-twisted/log.py</TT>, and you can skim the Twisted module for details if you are interested.
+    We won't bother showing the API for installing logging handlers, since <CODE>twistd</CODE> will do that for us.
+
+FastPoetry 2.0
+==============
+..
+    <H3>FastPoetry 2.0
+
+それではコードを見ていきましょう。
+早い詩のサーバを `twistd` で動かすように更新しました。
+ソースコードは `twisted-server-3/fastpoetry.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L1>`_ にあります。
+まずは `poetry protocol <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L9>`_ があります。
+::
+
+    class PoetryProtocol(Protocol):
+
+        def connectionMade(self):
+            poem = self.factory.service.poem
+            log.msg('sending %d bytes of poetry to %s'
+                    % (len(poem), self.transport.getPeer()))
+            self.transport.write(poem)
+            self.transport.loseConnection()
+
+..
+    Alright, let's look at some code. We've updated the fast poetry server to run with <TT>twistd</TT>. The source is located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L1"><TT>twisted-server-3/fastpoetry.py</TT></A>. First we have the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L9">poetry protocol</A>:
+    class PoetryProtocol(Protocol):
+
+        def connectionMade(self):
+            poem = self.factory.service.poem
+            log.msg('sending %d bytes of poetry to %s'
+                    % (len(poem), self.transport.getPeer()))
+            self.transport.write(poem)
+            self.transport.loseConnection()
+
+それぞれの新しい接続を記録するために ``print`` 文ではなく ``twisted.python.log.msg`` 関数を使っていることに注意してください。
+`factory クラス <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L19>`_ は次のようになります。
+::
+
+    class PoetryFactory(ServerFactory):
+
+        protocol = PoetryProtocol
+
+        def __init__(self, service):
+            self.service = service
+
+..
+    Notice instead of using a <CODE>print</CODE> statement, we're using the <CODE>twisted.python.log.msg</CODE> function to record each new connection.<BR>
+    Here's the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L19">factory class</A>:
+    class PoetryFactory(ServerFactory):
+
+        protocol = PoetryProtocol
+
+        def __init__(self, service):
+            self.service = service
+
+お分かりのように、詩はもはやファクトリに保存されず、ファクトリから参照されるサービスオブジェクトに保存されます。
+プロトコルが、ファクトリ経由でサービスから詩を取得する方法に注意してください。
+最後に、 `サービスクラス自身 <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L27>`_ を見てみましょう。
+::
+
+    class PoetryService(service.Service):
+
+        def __init__(self, poetry_file):
+            self.poetry_file = poetry_file
+
+        def startService(self):
+            service.Service.startService(self)
+            self.poem = open(self.poetry_file).read()
+            log.msg('loaded a poem from: %s' % (self.poetry_file,))
+
+..
+    As you can see, the poem is no longer stored on the factory, but on a service object referenced by the factory. Notice how the protocol gets the poem from the service via the factory. Finally, here's the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L27">service class itself</A>:
+    class PoetryService(service.Service):
+
+        def __init__(self, poetry_file):
+            self.poetry_file = poetry_file
+
+        def startService(self):
+            service.Service.startService(self)
+            self.poem = open(self.poetry_file).read()
+            log.msg('loaded a poem from: %s' % (self.poetry_file,))
+
+他の多くの ``Interface`` クラスのように、Twisted は私たちが独自実装を作るために使える基底クラスを提供します。これは役に立つデフォルトの振る舞いを持ちます。
+ここでは ``PoetryService`` を実装するために `twisted.application.service.Service <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L154>`_ クラスを使います。
+
+基底クラスはすべての必須メソッドにおいてデフォルト実装を提供しますので、独自の振る舞いだけを実装すれば構いません。
+ここでは詩のファイルを読み込むために ``startService`` を上書き (`override`) するだけです。
+とはいえ基底クラスのメソッド (``running`` 属性を設定してくれます) を呼び出していることに注意してください。
+
+..
+    As with many other <CODE>Interface</CODE> classes, Twisted provides a base class we can use to make our own implementations, with helpful default behaviors. Here we use the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L154"><CODE>twisted.application.service.Service</CODE></A> class to implement our <CODE>PoetryService</CODE>.
+    The base class provides default implementations of all required methods, so we only need to implement the ones with custom behavior. In this case, we just override <CODE>startService</CODE> to load the poetry file. Note we still call the base class method (which sets the <CODE>running</CODE> attribute for us).
+
+言及しておく価値のあることがもう一点あります。
+``PoetryService`` オブジェクトは ``PoetryProtocol`` の詳細について何も知りません。
+サービスがすべきことは、詩を読み込んでそれを必要とするすべてのオブジェクトにアクセス手段を提供するだけです。
+言い換えると ``PoetryService`` は、TCP 接続を介して詩を送信するような低レベルの詳しいことよりは、詩を提供するための高レベルの詳しいことに関心があるのです。
+このため、たとえば UDP や XML-RPC のような他のプロトコルでも同じサービスを利用できます。
+私たちの単純なサービスでは小さなことですが、もっと現実的なサービスの実装ではアドバンテージを想像できるでしょう。
+
+..
+    Another point is worth mentioning. The <CODE>PoetryService</CODE> object doesn't know anything about the details of the <CODE>PoetryProtocol</CODE>. The service's only job is to load the poem and provide access to it for any object that might need it. In other words, the <CODE>PoetryService</CODE> is entirely concerned with the higher-level details of providing poetry, rather than the lower-level details of sending a poem down a TCP connection. So this same service could be used by another protocol, say UDP or XML-RPC. While the benefit is rather small for our simple service, you can imagine the advantage for a more realistic service implementation.
+
+これが典型的な Twisted プログラムだったとすれば、これまで見てきた全てのコードは実際にはこのファイルには存在しません。
+むしろ他のモジュール (``fastpoetry.protocol`` や ``fastpoetry.service``) にあるべきでしょう。
+しかし、例が自己包括になるように作ってきた方法に従い、単一のスクリプトにすべてを含めるようにしてきました。
+
+..
+    If this were a typical Twisted program, all the code we've looked at so far wouldn't actually be in this file. Rather, it would be in some other module(s) (perhaps <CODE>fastpoetry.protocol</CODE> and <CODE>fastpoetry.service</CODE>). But following our usual practice of making these examples self-contained, we've including everything we need in a single script.
+
+Twisted `tac` ファイル
+----------------------
+..
+    <H4>Twisted <TT>tac</TT> files
+
+スクリプトの残りの部分は通常はコンテンツ全体を含んでいます。 Twisted の `tac` ファイルです。
+`tac` ファイルは ``twistd`` にアプリケーション構築方法を伝えるための Twisted アプリケーションの設定ファイルです。 
+設定ファイルですので、設定を選択すること (ポート番号や詩のファイル置き場など) は特定の方法でアプリケーションを実行することに責任を持ちます。
+言い換えると、 `tac` ファイルは、いかなる詩のサーバでも起動できるような汎用的なスクリプトというよりは、
+サービスにおける特定の配備を表現します ("あの"詩を"この"ポートで提供する)。
+
+..
+    The rest of the script contains what would normally be the entire content — a Twisted <TT>tac</TT> file. A <TT>tac</TT> file is a Twisted Application Configuration file that tells <CODE>twistd</CODE> how to construct an application. As a configuration file it is responsible for choosing settings (like port numbers, poetry file locations, etc.) to run the application in some particular way. In other words, a <TT>tac</TT> file represents a specific deployment of our service (serve <EM>that</EM> poem on <EM>this</EM> port) rather than a general script for starting any poetry server.
+
+複数の詩のサーバを同じホスト上で実行するなら、それぞれに対して `tac` ファイルを用意することになります
+(`tac` ファイルが汎用的な目的のコードを含まない理由を理解して頂けるでしょうか)。
+私たちの例では、 `tac` ファイルは ``poetry/ecstasy.txt`` をループバックインターフェイスの `10000` 番ポートで提供するように設定されています。
+::
+
+    # configuration parameters
+    port = 10000
+    iface = 'localhost'
+    poetry_file = 'poetry/ecstasy.txt'
+
+..
+    If we were running multiple poetry servers on the same host, we would have a <TT>tac</TT> file for each one (so you can see why <TT>tac</TT> files normally don't contain any general-purpose code). In our example, the <TT>tac</TT> file is configured to serve <TT>poetry/ecstasy.txt</TT> run on port <CODE>10000</CODE> of the loopback interface:
+    # configuration parameters
+    port = 10000
+    iface = 'localhost'
+    poetry_file = 'poetry/ecstasy.txt'
+
+`twistd` はこれらの特定の変数に関して何も知らない、ということに注意しましょう。
+設定値を一ヶ所にまとめておくために定義しているだけです。
+実際には、ちょっと先で見ていくように、 `twistd` はファイル全体でひとつの変数を管理しているだけです。
+次に、アプリケーションを構築していくことを `始めましょう <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L44>`_ 。
+::
+
+    # this will hold the services that combine to form the poetry server
+    top_service = service.MultiService()
+
+..
+    Note that <TT>twistd</TT> doesn't know anything about these particular variables, we just define them here to keep all our configuration values in one place. In fact, <TT>twistd</TT> only really cares about one variable in the entire file, as we'll see shortly. Next we <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L44">begin</A> building up our application:
+    # this will hold the services that combine to form the poetry server
+    top_service = service.MultiService()
+
+私たちの詩のサーバはふたつのサービスから構成されます。上で定義した ``PoetryService`` と、詩を送り出すために待ち受けるソケットを生成する Twisted 組み込みのサービスです。
+これらふたつのサービスはお互いにはっきりと関連付いていますので、 `MultiService
+<http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L253>`_ を使ってグループ化しておきましょう。
+``MultiService`` は ``IService`` と ``IServiceCollection`` の両方を実装しているTwisted のクラスです。 
+
+..
+    Our poetry server is going to consist of two services, the <CODE>PoetryService</CODE> we defined above, and a Twisted built-in service that creates the listening socket our poem will be served from. Since these two services are clearly related to each other, we'll group them together using a <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L253"><CODE>MultiService</CODE></A>, a Twisted class which implements both <CODE>IService</CODE> and <CODE>IServiceCollection</CODE>.
+
+サービスの集合ですから ``MultiService`` はふたつの詩のサービスをグループ化してくれます。
+サービスでもありますので、 ``MultiService`` 自身が開始されると子供となるサーバの起動もやってくれますし、停止するときはそれらも停止させます。
+ひとつ目の詩のサービスを集合に `追加 <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L48>`_ してみましょう。
+::
+
+    # the poetry service holds the poem. it will load the poem when it is
+    # started
+    poetry_service = PoetryService(poetry_file)
+    poetry_service.setServiceParent(top_service)
+
+..
+    As a service collection, the <CODE>MultiService</CODE> will group our two poetry services together. And as a service, the <CODE>MultiService</CODE> will start both child services when the <CODE>MultiService</CODE> itself is started, and stop both child services when it is stopped. Let's <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L48">add</A> the first poetry service to the collection:
+    # the poetry service holds the poem. it will load the poem when it is
+    # started
+    poetry_service = PoetryService(poetry_file)
+    poetry_service.setServiceParent(top_service)
+
+これは非常に簡単なことです。
+``PoetryService`` を作成して、 ``setServiceParent`` で集合に追加するだけです。
+このメソッドは Twisted の基底クラスから継承しています。
+次は TCP リスナーを `加えましょう <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L53>`_ 。
+::
+
+    # the tcp service connects the factory to a listening socket. it will
+    # create the listening socket when it is started
+    factory = PoetryFactory(poetry_service)
+    tcp_service = internet.TCPServer(port, factory, interface=iface)
+    tcp_service.setServiceParent(top_service)
+
+..
+    This is pretty simple stuff. We just create the <CODE>PoetryService</CODE> and then add it to the collection with <CODE>setServiceParent</CODE>, a method we inherited from the Twisted base class. Next we <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L53">add</A> the TCP listener:
+    # the tcp service connects the factory to a listening socket. it will
+    # create the listening socket when it is started
+    factory = PoetryFactory(poetry_service)
+    tcp_service = internet.TCPServer(port, factory, interface=iface)
+    tcp_service.setServiceParent(top_service)
+
+Twisted は、特定のファクトリ (今の場合は ``PoetryFactory``) に接続して TCP を待ち受けるソケットを生成するために、 ``TCPServer`` サービスを提供します。
+`tac` ファイルの仕事でアプリケーションは開始できる状態 (実際に開始はしませんが) になりますので、 ``reactor.listenTCP`` を直接呼び出すことはしません。 
+`twistd` によって開始されると ``TCPServer`` はソケットを生成するでしょう。
+
+..
+    Twisted provides the <CODE>TCPServer</CODE> service for creating a TCP listening socket connected to an arbitrary factory (in this case our <CODE>PoetryFactory</CODE>). We don't call <CODE>reactor.listenTCP</CODE> directly because the job of a <TT>tac</TT> file is to get our application ready to start, without actually starting it. The <CODE>TCPServer</CODE> will create the socket after it is started by <TT>twistd</TT>.
+
+ここまでで、サービスに名前を付けていないことに気付いたかもしれません。
+サービスに名前を付けることは必須事項ではなく、実行時に探し出したい ("look up") ならそうするべき、というオプション機能です。
+今の小さなアプリケーションではその必要はありませんので、ここでは取り上げません。
+
+..
+    You might have noticed we didn't bother to give any of our services names. Naming services is not required, but only an optional feature you can use if you want to 'look up' services at runtime. Since we don't need to do that in our little application, we don't bother with it here.
+
+ようやくふたつのサービスを集合にまとめることができましたね。
+``Application`` を作って集合に `追加します <http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L58>`_ 。
+::
+
+    # this variable has to be named 'application'
+    application = service.Application("fastpoetry")
+
+    # this hooks the collection we made to the application
+    top_service.setServiceParent(application)
+
+..
+    Ok, now we've got both our services combined into a collection. Now we just make our <CODE>Application</CODE> and <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-3/fastpoetry.py#L58">add</A> our collection to it:
+    # this variable has to be named 'application'
+    application = service.Application("fastpoetry")
+
+    # this hooks the collection we made to the application
+    top_service.setServiceParent(application)
+
+このスクリプト内で `twistd` が本当に注意する唯一の変数は ``application`` だけです。
+`twistd` は開始されるべきであるアプリケーションを見つけるでしょう (変数は "``application``" という名前でなくてはなりません)。
+アプリケーションが開始されると、追加しておいた全てのサービスも同様に開始されるでしょう。
+
+..
+    The only variable in this script that <TT>twistd</TT> really cares about is the <CODE>application</CODE> variable. That is how <TT>twistd</TT> will find the application it's supposed to start (and so the variable has to be named 'application'). And when the application is started, all the services we added to it will be started as well.
+
+図34で、ここまでで作ったアプリケーションの構造を示します。
+
+.. _figure34:
+
+.. figure:: images/p16_application.png
+
+   図34： fastpoetry アプリケーションの構造
+
+..
+    Figure 34 shows the structure of the application we just built:
+    <DIV id="attachment_2400" class="wp-caption aligncenter" style="width: 361px"><A href="./part16_files/application.png"><IMG class="size-full wp-image-2400 " title="Figure 34: the structure of our fastpoetry application" src="./part16_files/application.png" alt="Figure 34: the structure of our fastpoetry application" width="351" height="277"></A><P class="wp-caption-text">Figure 34: the structure of our fastpoetry application</DIV>
+
+サーバを動かす
+--------------
+..
+    <H4>Running the Server
+
+新しいサーバを動かしてみましょう。
+`tac` ファイルを参照し、 `twistd` を使って開始させます。
+もちろん、これも普通の Python ファイルです。
+まずは Python を使って実行して何が起こるかを見てみます。
+::
+
+    python twisted-server-3/fastpoetry.py
+
+..
+    Let's take our new server for a spin. As a <TT>tac</TT> file, we need to start it with <TT>twistd</TT>. Of course, it's also just a regular Python file, too. So let's run it with Python first and see what happens:
+    python twisted-server-3/fastpoetry.py
+
+やってみると、何も起こらないことがわかるでしょう！
+先ほど書いたように、 `tac` ファイルの仕事はアプリケーションを実行可能な状態にすることで、実際に実行はしません。
+こうした `tac` ファイルの特別な目的を覚えておくために、拡張子に `.py` ではなく `.tac` を使う人もいます。
+しかし `twistd` スクリプトは拡張子に関して気にしません。
+
+..
+    If you do this, you'll find that what happens is nothing! As we said before, the job of a <TT>tac</TT> file is to get an application ready to run, without actually running it. As a reminder of this special purpose of <TT>tac</TT> files, some people name them with a <TT>.tac</TT> extension instead of <TT>.py</TT>. But the <TT>twistd</TT> script doesn't actually care about the extension.
+
+それでは `twistd` を使って実際にサーバを動かしてみましょう。
+::
+
+    twistd --nodaemon --python twisted-server-3/fastpoetry.py
+
+..
+    Let's run our server for real, using <TT>twistd</TT>:
+    twistd --nodaemon --python twisted-server-3/fastpoetry.py
+
+このコマンドを実行すると、次のような出力を得られるでしょう。
+::
+
+    2010-06-23 20:57:14-0700 [-] Log opened.
+    2010-06-23 20:57:14-0700 [-] twistd 10.0.0 (/usr/bin/python 2.6.5) starting up.
+    2010-06-23 20:57:14-0700 [-] reactor class: twisted.internet.selectreactor.SelectReactor.
+    2010-06-23 20:57:14-0700 [-] __builtin__.PoetryFactory starting on 10000
+    2010-06-23 20:57:14-0700 [-] Starting factory &lt;__builtin__.PoetryFactory instance at 0x14ae8c0&gt;
+    2010-06-23 20:57:14-0700 [-] loaded a poem from: poetry/ecstasy.txt
+
+..
+    After running that command, you should see some output like this:
+    2010-06-23 20:57:14-0700 [-] Log opened.
+    2010-06-23 20:57:14-0700 [-] twistd 10.0.0 (/usr/bin/python 2.6.5) starting up.
+    2010-06-23 20:57:14-0700 [-] reactor class: twisted.internet.selectreactor.SelectReactor.
+    2010-06-23 20:57:14-0700 [-] __builtin__.PoetryFactory starting on 10000
+    2010-06-23 20:57:14-0700 [-] Starting factory <__builtin__.PoetryFactory instance at 0x14ae8c0>
+    2010-06-23 20:57:14-0700 [-] loaded a poem from: poetry/ecstasy.txt
+
+いくつか気にかけておくことがあります。
+
+* Twisted のロギングシステムからの出力が見えます。 ``PoetryFactory`` が ``log.msg`` を呼び出すことも含みます。
+  `tac` ファイルでロガーをインストールしていませんので、 `twistd` がインストールしてくれました。
+* ふたつのメインサービスもあり、 ``PoetryService`` と ``TCPServer`` が起動しています。
+* シェルプロンプトは決して制御を戻しません。
+  サーバがデーモンとして動作していないことを意味します。
+  デフォルトでは、 `twistd` はデーモンプロセスとしてサーバを実行します (それこそが `twistd` の主要な存在理由ですから) が、
+  ``--nodaemon`` オプションを付けると `twistd` はサーバを通常のシェルプロセスとして実行し、標準出力にログを出力します。
+  この挙動は `tac` ファイルをデバッグするときに便利です。
+
+..
+    Here's a few things to notice:
+    <OL>
+    * You can see the output of the Twisted logging system, including the <CODE>PoetryFactory</CODE>'s call to <CODE>log.msg</CODE>. But we didn't install a logger in our <TT>tac</TT> file, so <TT>twistd</TT> must have installed one for us.
+    * You can also see our two main services, the <CODE>PoetryService</CODE> and the <CODE>TCPServer</CODE> starting up.
+    * The shell prompt never came back. That means our server isn't running as a daemon. By default, <TT>twistd</TT> does run a server as a daemon process (that's the main reason <TT>twistd</TT> exists), but if you include the <TT>--nodaemon</TT> option then <TT>twistd</TT> will run your server as a regular shell process instead, and will direct the log output to standard output as well. This is useful for debugging your <TT>tac</TT> files.
+    </OL>
+
+それでは詩を取得してサーバをテストしてみましょう。
+これまでに作ってきた詩のクライアントでも、単に ``netcat`` を使っても構いません。
+::
+
+    netcat localhost 10000
+
+..
+    Now test out the server by fetching a poem, either with one of our poetry clients or just <TT>netcat</TT>:
+    netcat localhost 10000
+
+サーバから取得して、次のような新しいログが出力されるでしょうか。
+::
+
+    2010-06-27 22:17:39-0700 [__builtin__.PoetryFactory] sending 3003 bytes of poetry to IPv4Address(TCP, '127.0.0.1', 58208)
+
+..
+    That should fetch the poem from the server and you should see a new log line like this:
+    2010-06-27 22:17:39-0700 [__builtin__.PoetryFactory] sending 3003 bytes of poetry to IPv4Address(TCP, '127.0.0.1', 58208)
+
+これは ``PoetryProtocol.connectionMade`` の ``log.msg`` の呼び出しによるものです。
+サーバにもっとリクエストを発行してみると、それぞれのリクエストごとにログが出力されます。
+
+ではここで ``Ctrl+C`` を押してサーバを停止させましょう。
+次のような出力があるはずです。
+::
+
+    ^C2010-06-29 21:32:59-0700 [-] Received SIGINT, shutting down.
+    2010-06-29 21:32:59-0700 [-] (Port 10000 Closed)
+    2010-06-29 21:32:59-0700 [-] Stopping factory <__builtin__.PoetryFactory instance at 0x28d38c0>
+    2010-06-29 21:32:59-0700 [-] Main loop terminated.
+    2010-06-29 21:32:59-0700 [-] Server Shut Down.
+
+..
+    That's from the call to <CODE>log.msg</CODE> in <CODE>PoetryProtocol.connectionMade</CODE>. As you make more requests to the server, you will see additional log entries for each request.
+    Now stop the server by pressing <TT>Ctrl-C</TT>. You should see some output like this:
+    ^C2010-06-29 21:32:59-0700 [-] Received SIGINT, shutting down.
+    2010-06-29 21:32:59-0700 [-] (Port 10000 Closed)
+    2010-06-29 21:32:59-0700 [-] Stopping factory &lt;__builtin__.PoetryFactory instance at 0x28d38c0&gt;
+    2010-06-29 21:32:59-0700 [-] Main loop terminated.
+    2010-06-29 21:32:59-0700 [-] Server Shut Down.
+
+お分かりのように、Twisted はクラッシュしません。
+きれいに自分自身を停止させ、ログメッセージでそれに関して教えてくれます。
+ふたつのメインサービスも同じように停止しています。
+
+..
+    As you can see, Twisted does not simply crash, but shuts itself down cleanly and tells you about it with log messages. Notice our two main services shutting themselves down as well.
+
+もう一度サーバを起動させましょう。
+::
+
+    twistd --nodaemon --python twisted-server-3/fastpoetry.py
+
+..
+    Ok, now start the server up once more:
+    twistd --nodaemon --python twisted-server-3/fastpoetry.py
+
+シェルをもう一つ開いて `twisted-intro` ディレクトリに移動してください。
+ディレクトリ一覧に `twistd.pid` ファイルがあるはずです。
+このファイルは `twistd` によって作成され、起動中のサーバのプロセス ID が保存されています。
+サーバを停止させるために次のコマンドを実行してみましょう。
+::
+
+    kill `cat twistd.pid`
+
+..
+    Then open another shell and change to the <TT>twisted-intro</TT> directory. A directory listing should show a file called <TT>twistd.pid</TT>. This file is created by <TT>twistd</TT> and contains the process ID of our running server. Try executing this alternative command to shut down the server:
+    kill `cat twistd.pid`
+
+サーバを停止するときに、 `twistd` がプロセス ID のファイルを削除してくれます。
+
+..
+    Notice that <TT>twistd</TT> cleans up the process ID file when our server shuts down.
+
+現実のデーモン
+--------------
+..
+    <H4>A Real Daemon
+
+サーバを実際のデーモンプロセスとして実行させましょう。
+`twistd` のデフォルトの振る舞いですので、むしろ簡単です。
+::
+
+    twistd --python twisted-server-3/fastpoetry.py
+
+..
+    Now let's start our server as an actual daemon process, which is even simpler to do as it's <TT>twistd</TT>'s default behavior:
+    twistd --python twisted-server-3/fastpoetry.py
+
+今回はシェルのプロンプトはすぐさま処理を返してきましたね。
+ディレクトリの一覧を表示させてみると、実行させているサーバの `twistd.pid` ファイルに加えて、
+先ほどまではシェルプロンプトに表示されていたログが書き込まれる `twistd.log` ファイルもあるはずです。
+
+..
+    This time we get our shell prompt back almost immediately. And if you list the contents of your directory you will see, in addition to the <TT>twistd.pid</TT> file for the server we just ran, a <TT>twistd.log</TT> file with the log entries that were formerly displayed at the shell prompt.
+
+デーモンプロセスを開始させると、 `twistd` は標準出力ではなくログファイルに書く込むログハンドラーをインストールします。
+デフォルトのログファイルは `twistd.log` で、 `twistd` を実行させた場所と同じディレクトリです。
+しかし、必要なら ``--logfile`` オプションを使って変更することもできます。
+`twistd` がインストールするハンドラーはログファイルのサイズが 1MB を超過する度にログローテートもやってくれます。
+
+..
+    When starting a daemon process, <TT>twistd</TT> installs a log handler that writes entries to a file instead of standard output. The default log file is <TT>twistd.log</TT>, located in the same directory where you ran <TT>twistd</TT>, but you can change that with the <TT>--logfile</TT> option if you wish. The handler that <TT>twistd</TT> installs also rotates the log whenever the size exceeds one megabyte.
+
+システム上の全てのプロセスを一覧表示することで、実行中のサーバを見えるようにしておくべきでしょう。
+もうひとつの詩を取得することでサーバをテストしてみましょう。
+リクエストしたそれぞれの詩に対してログファイルに新しいエントリが追加されますよね。
+
+..
+    You should be able to see the server running by listing all the processes on your system. Go ahead and test out the server by fetching another poem. You should see new entries appear in the log file for each poem you request.
+
+サーバはもはやシェルに繋がっていません (`init <http://en.wikipedia.org/wiki/Init>`_ を除くいかなるものともです) ので、
+``Ctrl-C`` では停止させることができません。
+きちんとしたデーモンプロセスですので、あなたがログアウトしても動き続けてくれるでしょう。
+しかし、 `twistd.pid` ファイルを使ってプロセスを停止させることはできます。
+::
+
+    kill `cat twistd.pid`
+
+..
+    Since the server is no longer connected to the shell (or any other process except <A href="http://en.wikipedia.org/wiki/Init"><TT>init</TT></A>), you cannot shut it down with <TT>Ctrl-C</TT>. As a true daemon process, it will continue to run even if you log out. But we can still use the <TT>twistd.pid</TT> file to stop the process:
+    kill `cat twistd.pid`
+
+ログに停止メッセージが書き込まれると、 `twistd.pid` ファイルが削除され、サーバが止まります。やりましたね。
+
+..
+    And when that happens the shutdown messages appear in the log, the <TT>twistd.pid</TT> file is removed, and our server stops running. Neato.
+
+`twistd` のその他の起動オプションを確認しておくのは良い考えですね。
+たとえば、デーモンを実行させる前に異なるユーザーやグループのアカウントに切り替わるよう `twistd` に伝えることがあります
+(典型的には、セキュリティ警告により、サーバが必要としない権限をそぎ落とすことがあります)。
+他のオプションを見ていくのは退屈なので、  `twistd` に ``--help`` オプションを渡して確認しておいてください。
+
+..
+    It's a good idea to check out some of the other <TT>twistd</TT> startup options. For example, you can tell <TT>twistd</TT> to switch to a different user or group account before starting the daemon (typically a way to drop privileges your server doesn't need as a security precaution). We won't bother going into those extra options, you can find them using the <TT>--help</TT> switch to <TT>twistd</TT>.
+
+Twisted のプラグイン機構
+========================
+..
+    <H3>The Twisted Plugin System
+
+よし、それではサーバをまっとうなデーモンプロセスとして起動するために `twistd` を使いましょう。
+すべてがよくできており、設定ファイルが本当に Python のソースファイルであるということで、設定には非常な柔軟さがあります。
+とはいえ、いつも多大なる柔軟性が必要なわけでもありません。
+私たちの詩のサーバにとっては、注意すべきは 2, 3 のオプションだけでしょう。
+
+* 提供する詩
+* 提供するためのポート番号
+* 待ち受けるインターフェイス
+
+..
+    Ok, now we can use <TT>twistd</TT> to start up our servers as genuine daemon processes. This is all very nice, and the fact that our "configuration" files are really just Python source files gives us a great deal of flexibility in how we set things up. But we don't always need that much flexibility. For our poetry servers, we typically only have a few options we might care about:
+    <OL>
+    * The poem to serve.
+    * The port to serve it from.
+    * The interface to listen on.
+    </OL>
+
+これらの値ごとに簡単なバリエーションの新しい `tac` ファイルを作るのは、ちょっとやりすぎ感があります。
+`twistd` のコマンドラインにオプションとして指定できると良さそうですね。
+これは Twisted のプラグインシステムで実現できます。
+
+..
+    Making new <TT>tac</TT> files for simple variations on those values seems rather excessive. It would be nice if we could just specify those values as options on the <TT>twistd</TT> command line. The Twisted plugin system allows us to do just that.
+
+Twisted のプラグインは名前を付けられた Application を定義する方法を提供してくれます。
+`twistd` が動的に発見して実行できるようなコマンドラインオプションのセットも一緒です。
+Twisted 自体にも組み込みプラグインのセットがあります。
+`twistd` に引数を何もつけずに実行すると見ることができます。
+`twisted-intro` ディレクトリの外で、とりあえずやってみましょう。
+ヘルプ部分の後ろに、次のような出力が見えますよね。
+::
+
+        ...
+        ftp                An FTP server.
+        telnet             A simple, telnet-based remote debugging service.
+        socks              A SOCKSv4 proxy service.
+        ...
+
+..
+    Twisted plugins provide a way of defining named Applications, with a custom set of command-line options, that <TT>twistd</TT> can dynamically discover and run. Twisted itself comes with a set of built-in plugins. You can see them all by running <TT>twistd</TT> without any arguments. Try running it now, but outside of the <TT>twisted-intro</TT> directory. After the help section, you should see some output like this:
+        ...
+        ftp                An FTP server.
+        telnet             A simple, telnet-based remote debugging service.
+        socks              A SOCKSv4 proxy service.
+        ...
+
+それぞれの行は Twisted の組み込みプラグイン を表します。
+`twistd` を使ってどれでも起動できます。
+それぞれのプラグインは独自のオプションを持ち、 ``--help`` を使うと見つけられます。
+`ftp` プラグインのオプションを見てみましょう。
+::
+
+    twistd ftp --help
+
+..
+    Each line shows one of the built-in plugins that come with Twisted. And you can run any of them using <TT>twistd</TT>.<BR>
+    Each plugin also comes with its own set of options, which you can discover using <TT>--help</TT>. Let's see what the options for the <TT>ftp</TT> plugin are:
+    twistd ftp --help
+
+`twistd` 自身ではなく `ftp` プラグインのオプションですので、
+`ftp` コマンドの後に ``--help`` オプションを配置していることに気をつけてください。
+詩のサーバを動かしたように、 `twistd` を使って `ftp` サーバを動かすことができます。
+プラグインですから名前を指定するだけで動かせます。
+::
+
+    twistd --nodaemon ftp --port 10001
+
+..
+    Note that you need to put the <TT>--help</TT> switch after the <TT>ftp</TT> command, since you want the options for the <TT>ftp</TT> plugin rather than for <TT>twistd</TT> itself.<BR>
+    We can run the <TT>ftp</TT> server with <TT>twistd</TT> just like we ran our poetry server. But since it's a plugin, we just run it by name:
+    twistd --nodaemon ftp --port 10001
+
+このコマンドは `ftp` プラグインをデーモンではないモードで 10001 番ポートで動かします。
+プラグイン特有のオプションである ``port`` はプラグイン名の後ですが、 `twistd` の ``nodaemon`` オプションはプラグイン名の前であることに気をつけてください。
+詩のサーバでもやってみたように、 ``Ctrl-C`` でプラグインを停止できます。
+
+..
+    That command runs the <TT>ftp</TT> plugin in non-daemon mode on port 10001. Note the <TT>twistd</TT> option <TT>nodaemon</TT> comes before the plugin name, while the plugin-specific option <TT>port</TT> comes after the plugin name. As with our poetry server, you can stop that plugin with <TT>Ctrl-C</TT>.
+
+それでは、私たちの詩のサーバを Twisted プラグイン化してみましょう。
+まずは 2, 3 の新しいコンセプトを紹介します。
+
+..
+    Ok, let's turn our poetry server into a Twisted plugin. First we need to introduce a couple of new concepts.
+
+IPlugin
+-------
+..
+    <H4>IPlugin
+
+あらゆる Twisted プラグインは `twisted.plugin.IPlugin <http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/plugin.py#L38>`_
+インターフェイスを実装しなくてはなりません。
+``Interface`` の宣言を見てみると、実際には何のメソッドも定義していないことが分かるでしょう。
+``IPlugin`` を実装することは、 `twistd` が見つけられるように、 プラグインが「やぁ、自分はプラグインだよ！」と主張する簡単な方法です。
+もちろん、何かの用途で他のインターフェイスを実装しなくてはならないでしょうし、少し先でやってみます。
+
+..
+    Any Twisted plugin must implement the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/plugin.py#L38"><CODE>twisted.plugin.IPlugin</CODE></A> interface. If you look at the declaration of that <CODE>Interface</CODE>, you'll find it doesn't actually specify any methods. Implementing <CODE>IPlugin</CODE> is simply a way for a plugin to say "Hello, I'm a plugin!" so <TT>twistd</TT> can find it. Of course, to be of any use, it will have to implement some other interface and we'll get to that shortly.
+
+しかし、オブジェクトが空っぽのインターフェイスを実際に実装しているかを知るにはどうしましょうか？
+``zope.interface`` パッケージには、特定のクラスが特定のインターフェイスを実装していると宣言するために使う ``implements`` と呼ばれる関数があります。
+詩のサーバのプラグインバージョンで例を見ていきましょう。
+
+..
+    But how do you know if an object actually implements an empty interface? The <CODE>zope.interface</CODE> package includes a function called <CODE>implements</CODE> that you can use to declare that a particular class implements a particular interface. We'll see an example of that in the plugin version of our poetry server.
+
+IServiceMaker
+-------------
+..
+    <H4>IServiceMaker
+
+私たちのプラグインは、 ``IPlugin`` に加えて `IServiceMaker
+<http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L25>`_ インターフェイスも実装します。
+``IServiceMaker`` を実装しているオブジェクトはアプリケーションを実行する上で核となる ``IService`` の生成方法を知っています。
+``IServiceMaker`` には三つの属性とひとつのメソッドを指定します。
+
+..
+    In addition to <CODE>IPlugin</CODE>, our plugin will implement the <A href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.0.0/twisted/application/service.py#L25"><CODE>IServiceMaker</CODE></A> interface. An object which implements <CODE>IServiceMaker</CODE> knows how to create an <CODE>IService</CODE> that will form the heart of a running application. <CODE>IServiceMaker</CODE> specifies three attributes and a method:
+
+* ``tapname``: プラグインのための文字列名です。"tap" は Twisted Application Plugin を意味します。
+  Note: 古いバージョンの Twisted は "tapfiles" と呼ばれるピックル化されたアプリケーションファイルも使っていました。しかし、この機能は廃止されました。
+* ``description``: プラグインの説明です。ヘルプテキストの一部として `twistd` が表示します。
+* ``options``: このプラグインが受け付けるコマンドラインオプションを説明するオブジェクトです。
+* ``makeService``: 新しい ``IService`` オブジェクトを生成するメソッドです。メソッドには特定のコマンドラインオプションのセットが与えられます。
+
+..
+    <OL>
+    * <CODE>tapname</CODE>: a string name for our plugin. The "tap" stands for Twisted Application Plugin. Note: an older version of Twisted also made use of pickled application files called "tapfiles", but that functionality is deprecated.
+    * <CODE>description</CODE>: a description of the plugin, which <TT>twistd</TT> will display as part of its help text.
+    * <CODE>options</CODE>: an object which describes the command-line options this plugin accepts.
+    * <CODE>makeService</CODE>: a method which creates a new <CODE>IService</CODE> object, given a specific set of command-line options
+    </OL>
+
+次のバージョンの詩のサーバで、これらをまとめる方法をみていきましょう。
+
+..
+    We'll see how all this gets put together in the next version of our poetry server.
+
+Fast Poetry 3.0
+===============
+..
+    <H3>Fast Poetry 3.0
+
+Fast Poetry のプラグインバージョンに目を向ける準備が整いましたね。
+`twisted/plugins/fastpoetry_plugin.py <http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L1>`_ にあります。
+
+..
+    Now we're ready to take a look at the plugin version of Fast Poetry, located in <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L1"><TT>twisted/plugins/fastpoetry_plugin.py</TT></A>.
+
+
+これまでの例とは異なるディレクトリ名であることに気付いたでしょうか。
+`twistd` が、Python モジュールの検索パスから見て `twisted/plugins` ディレクトリにあるプラグインファイルを要求するためです。
+ディレクトリはパッケージである必要はありません (つまり ``__init__.py`` ファイルは不要です) し、
+パス上に複数の `twisted/plugins` ディレクトリがあっても構いません。
+`twistd` はそれらのすべてを見つけてくれるでしょう。
+プラグインのために使う実際のファイル名はどちらでも構いません。
+しかし、アプリケーションが実現することを表す名前にしておくべきでしょう。
+
+..
+    You might notice we've named these directories differently than any of the other examples. That's because <TT>twistd</TT> requires plugin files to be located in a <TT>twisted/plugins</TT> directory, located in your Python module search path. The directory doesn't have to be a package (i.e., you don't need any <TT>__init__.py</TT> files) and you can have multiple <TT>twisted/plugins</TT> directories on your path and <TT>twistd</TT> will find them all. The actual filename you use for the plugin doesn't matter either, but it's still a good idea to name it according to the application it represents, like we have done here.
+
+プラグインの最初の部分は `tac` ファイルの時と同じく、詩のプロトコルとファクトリ、そしてサービスの実装を含んでいます。
+なお先ほどとと同じように、このコードは通常は異なるモジュールにあるべきでしょうが、サンプルコードがひとつにまとまるように、プラグインにまとめています。
+
+..
+    The first part of our plugin contains the same poetry protocol, factory, and service implementations as our <TT>tac</TT> file. And as before, this code would normally be in a separate module but we've placed it in the plugin to make the example self-contained.
+
+次にプラグインのコマンドラインオプションの `宣言
+<http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L45>`_ があります。
+::
+
+    class Options(usage.Options):
+
+        optParameters = [
+            ['port', 'p', 10000, 'The port number to listen on.'],
+            ['poem', None, None, 'The file containing the poem.'],
+            ['iface', None, 'localhost', 'The interface to listen on.'],
+            ]
+
+..
+    Next comes the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L45">declaration</A> of the plugin's command-line options:
+    class Options(usage.Options):
+
+        optParameters = [
+            ['port', 'p', 10000, 'The port number to listen on.'],
+            ['poem', None, None, 'The file containing the poem.'],
+            ['iface', None, 'localhost', 'The interface to listen on.'],
+            ]
+
+このコードは、 `twistd` コマンドラインでユーザーがプラグイン名の後ろに指定できるプラグイン特有のオプションを定義します。
+何をやっているか比較的明らかなので、ここで深くは見ていきません。
+プラグインの中心となるコードに進んでいきましょう。
+`service maker クラス <http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L56>`_ です。
+::
+
+    class PoetryServiceMaker(object):
+
+        implements(service.IServiceMaker, IPlugin)
+
+        tapname = "fastpoetry"
+        description = "A fast poetry service."
+        options = Options
+
+        def makeService(self, options):
+            top_service = service.MultiService()
+
+            poetry_service = PoetryService(options['poem'])
+            poetry_service.setServiceParent(top_service)
+
+            factory = PoetryFactory(poetry_service)
+            tcp_service = internet.TCPServer(int(options['port']), factory,
+                                             interface=options['iface'])
+            tcp_service.setServiceParent(top_service)
+
+            return top_service
+
+..
+    This code specifies the plugin-specific options that a user can place after the plugin name on the <TT>twistd</TT> command line. We won't go into details here as it should be fairly clear what is going on. Now we get to the main part of our plugin, the <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L56">service maker class</A>:
+    class PoetryServiceMaker(object):
+
+        implements(service.IServiceMaker, IPlugin)
+
+        tapname = "fastpoetry"
+        description = "A fast poetry service."
+        options = Options
+
+        def makeService(self, options):
+            top_service = service.MultiService()
+
+            poetry_service = PoetryService(options['poem'])
+            poetry_service.setServiceParent(top_service)
+
+            factory = PoetryFactory(poetry_service)
+            tcp_service = internet.TCPServer(int(options['port']), factory,
+                                             interface=options['iface'])
+            tcp_service.setServiceParent(top_service)
+
+            return top_service
+
+このコードでは、 私たちのクラスが ``IServiceMaker`` と ``IPlugin`` の両方を実装する、と宣言するために ``zope.interface.implements`` 関数を使う方法が分かりますね。
+
+..
+    Here you can see how the <CODE>zope.interface.implements</CODE> function is used to declare that our class implements both <CODE>IServiceMaker</CODE> and <CODE>IPlugin</CODE>.
+
+以前の `tac` ファイル実装から ``makeService`` のコードを見つけられるでしょう。
+しかし、今回は自分たちで ``Application`` オブジェクトを作成する必要がありません。
+アプリケーションが起動できるようにトップレベルのサービスを生成して返してあげるだけで良いのです。
+残りは `twistd` がやってくれます。
+`twistd` に与えられたプラグイン特有のコマンドラインオプションを取得するために ``options`` 引数を使っていることに注意してください。
+
+..
+    You should recognize the code in <CODE>makeService</CODE> from our earlier <TT>tac</TT> file implementation. But this time we don't need to make an <CODE>Application</CODE> object ourselves, we just create and return the top level service that our application will run and <TT>twistd</TT> will take care of the rest. Notice how we use the <CODE>options</CODE> argument to retrieve the plugin-specific command-line options given to <TT>twistd</TT>.
+
+そのクラスを宣言した後に `やるべきこと
+<http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L81>`_ は次の一行だけです。 ::
+
+    service_maker = PoetryServiceMaker()
+
+..
+    After declaring that class, there's only on thing left <A href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted/plugins/fastpoetry_plugin.py#L81">to do</A>:
+    service_maker = PoetryServiceMaker()
+
+
+`twistd` スクリプトはプラグインのインスタンスを見つけて、トップレベルサービスを構築するために使うでしょう。
+`tac` ファイルとは異なり、変数名は取るに足らないものです。
+私たちのオブジェクトが ``IPlugin`` と ``IServiceMaker`` の両方を実装していること次第です。
+
+..
+    The <TT>twistd</TT> script will discover that instance of our plugin and use it to construct the top level service. Unlike the <TT>tac</TT> file, the variable name we choose is irrelevant.  What matters is that our object implements both <CODE>IPlugin</CODE> and <CODE>IServiceMaker</CODE>.
+
+自分たちのプラグインを作成しましたので、動かしてみましょう。
+`twisted-intro` ディレクトリにいるか、 `twisted-intro` ディレクトリが Python モジュールの検索パスに含まれていることを確認してくださいね。
+そうしたら `twistd` 自身を実行しましょう。
+プラグイン一覧のひとつに "fastpoetry" が見えるでしょうか。プラグインファイルに書いた説明文も表示されますよね。
+
+..
+    Now that we've created our plugin, let's run it. Make sure that you are in the <TT>twisted-intro</TT> directory, or that the <TT>twisted-intro</TT> directory is in your python module search path. Then try running <TT>twistd</TT> by itself. You should now see that "fastpoetry" is one of the plugins listed, along with the description text from our plugin file.
+
+`twisted/plugins` ディレクトリに ``dropin.cache`` と呼ばれる新しいファイルがあることにも気付きましたか。
+このファイルはプラグインが引き続いてスキャンするのを高速化するために `twistd` によって生成されます。
+
+..
+    You will also notice that a new file called <TT>dropin.cache</TT> has appeared in the <TT>twisted/plugins</TT> directory. This file is created by <TT>twistd</TT> to speed up subsequent scans for plugins.
+
+よし、プラグインのヘルプを表示させましょう。 ::
+
+    twistd fastpoetry --help
+
+..
+    Now let's get some help on using our plugin:
+    twistd fastpoetry --help
+
+ヘルプ文には fastpoetry プラグイン特有のオプションもあるでしょう。
+最後に、私たちが作ったプラグインを実行させましょう。 ::
+
+    twistd fastpoetry --port 10000 --poem poetry/ecstasy.txt
+
+..
+    You should see the options that are specific to the fastpoetry plugin in the help text. Finally, let's run our plugin:
+    twistd fastpoetry --port 10000 --poem poetry/ecstasy.txt
+
+これで fastpoetry サーバがデーモンとして動き出します。
+先ほどと同じように、カレントディレクトリに `twistd.pid` と `twistd.log` の両方のファイルがあるでしょう。
+サーバをテストし終わったら停止させましょう。 ::
+
+    kill `cat twistd.pid`
+
+..
+    That will start a fastpoetry server running as a daemon. As before, you should see both <TT>twistd.pid</TT> and <TT>twistd.log</TT> files in the current directory. After testing out the server, you can shut it down:
+    kill `cat twistd.pid`
+
+これで Twisted プラグインの作り方が分かりましたね。
+
+..
+    And that's how you make a Twisted plugin.
+
+まとめ
+======
+..
+    <H3>Summary
+
+このパートでは Twisted サーバをデーモンに変換することについて学びました。
+Twisted のロギングシステムと、 `twistd` を使って Twisted アプリケーションをデーモンプロセスとして起動する方法にも触れました。
+デーモンの設定は `tac` 設定ファイルか Twisted プラグインのどちらかから読み取ります。
+":doc:`p17`"では、非同期プログラミングのより本質的なトピックに戻り、Twisted でコールバック群を構成するもう一つの方法を見ていきましょう。
+
+..
+    In this Part we learned about turning our Twisted servers into long-running daemons. We touched on the Twisted logging system and on how to use <TT>twistd</TT> to start a Twisted application as a daemon process, either from a <TT>tac</TT> configuration file or a Twisted plugin. In <A href="http://krondo.com/blog/?p=2441">Part 17</A> we'll return to the more fundamental topic of asynchronous programming and look at another way of structuring our callbacks in Twisted.
+
+おすすめの練習問題
+==================
+..
+    <H3>Suggested Exercises
+
+#. ふたつ目の詩を異なるポートで提供するように `tac` ファイルを修正してみましょう。
+   異なる ``MultiService`` オブジェクトを使うことにより、それぞれの詩のためのサービスは別々にしてください。
+#. 詩のプロキシサーバを開始させるための新しい `tac` ファイルを作ってみましょう。
+#. オプションとして二つ目の詩のファイルを受け付けて、それは二つ目のポートで提供するようにプラグインファイルを修正してみましょう。
+#. 詩のプロキシサーバ用に新しいプラグインファイルを作ってみましょう。
+
+..
+    <OL>
+    * Modify the <TT>tac</TT> file to serve a second poem on another port. Keep the services for each poem separate by using another <CODE>MultiService</CODE> object.
+    * Create a new <TT>tac</TT> file that starts a poetry proxy server.
+    * Modify the plugin file to accept an optional second poetry file and second port to serve it on.
+    * Create a new plugin for the poetry proxy server.
+    </OL>

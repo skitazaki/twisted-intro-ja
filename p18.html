@@ -1,0 +1,315 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート18: Deferreds En Masse &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート19: 欲しいと思っていても考えを改めると" href="p19.html" />
+    <link rel="prev" title="パート17: 「コールバック」ではない方法" href="p17.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート18: Deferreds En Masse</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p17.html">パート17: 「コールバック」ではない方法</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p19.html">パート19: 欲しいと思っていても考えを改めると</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="deferreds-en-masse">
+<h1>パート18: Deferreds En Masse<a class="headerlink" href="#deferreds-en-masse" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id1">
+<h2>はじめに<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>ひとつ前の章で、ジェネレータを使って一連の非同期なコールバックを構成する新しい方法を学びました。
+遅延オブジェクトを使うことを含め、非同期操作を繋げる方法としてはふたつのテクニックを利用可能になりましたね。</p>
+<p>けれどもときどき、非同期操作をまとめて並列に実行させたくなりますよね。
+Twisted はシングルスレッドですので、本当に並行して動かすことはできませんが、大事な点は、できる限り素早くタスクグループを実行させるために非同期な入出力を使いたいことです。
+たとえば詩のクライアントでは、同時に複数のサーバから詩をダウンロードします。サーバを順々に回ったりはしません。
+結局のところ、これこそが詩を取得するために Twisted を使う全てなのです。</p>
+<p>そして結果として、すべての詩のクライアントはこの問題を解かなくてはなりませんでした。</p>
+<blockquote>
+<div><p>あなたが開始したすべての非同期操作が完了したときを、どうよって知るのでしょうか？</p>
+</div></blockquote>
+<p>ここまでは、結果をリストに詰め込み (クライアント 7.0 にある <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L160">results</a> 一覧のように)、 その大きさを確認することで問題を解決してきました。
+成功した結果と同様に、失敗した場合も収集しておくことに気を遣わなくてはなりません。
+さもなくば、ひとつの失敗がプログラムを永久に実行させてしまうことに繋がります。すべきことが残っていると考えてしまうのです。</p>
+<p>ご期待のように、Twisted はこの問題を解決するために利用できる抽象化を持ち合わせています。
+今日はこれを見ていくことにしましょう。</p>
+</div>
+<div class="section" id="deferredlist">
+<h2>DeferredList<a class="headerlink" href="#deferredlist" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#593">DeferredList</a> クラスは遅延オブジェクトのリストをひとつの遅延オブジェクトとして扱えるようにしてくれます。
+これにより、たくさんの非同期操作を開始し、それらすべてが終了したときにだけ知らせてもらえます (それらが成功したか失敗したかに関わらず)。
+いくつかの例を見ていきましょう。</p>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-1.py#L1">deferred-list/deferred-list-1.py</a> には次のコードがあります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">got_results</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;We got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="nb">print</span> <span class="s1">&#39;Empty List.&#39;</span>
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">DeferredList</span><span class="p">([])</span>
+<span class="nb">print</span> <span class="s1">&#39;Adding Callback.&#39;</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">got_results</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>実行させてみると、次の出力を得られます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Empty</span> <span class="n">List</span><span class="o">.</span>
+<span class="n">Adding</span> <span class="n">Callback</span><span class="o">.</span>
+<span class="n">We</span> <span class="n">got</span><span class="p">:</span> <span class="p">[]</span>
+</pre></div>
+</div>
+<p>いくつか注意しておきましょう。</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> は Python の <code class="docutils literal notranslate"><span class="pre">list</span></code> から生成されます。ここではリストは空です。しかし、全ての要素が <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> オブジェクトでなければならないことがすぐに分かります。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> はそれ自身が遅延オブジェクト (<code class="docutils literal notranslate"><span class="pre">Deferred</span></code> から継承されたもの) となります。
+通常の遅延オブジェクトと同様に、コールバックとエラー用コールバックを追加できるのです。</p></li>
+<li><p>上述の例では、コールバックは追加されるとすぐに発火されました。 <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> も同じく即座に発火しました。
+これについては後で議論していきます。</p></li>
+<li><p>遅延オブジェクトのリストの結果はそのままリスト (空) でした。</p></li>
+</ul>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-2.py#L1">deferred-list/deferred-list-2.py</a> を見てみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">got_results</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;We got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="nb">print</span> <span class="s1">&#39;One Deferred.&#39;</span>
+<span class="n">d1</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">DeferredList</span><span class="p">([</span><span class="n">d1</span><span class="p">])</span>
+<span class="nb">print</span> <span class="s1">&#39;Adding Callback.&#39;</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">got_results</span><span class="p">)</span>
+<span class="nb">print</span> <span class="s1">&#39;Firing d1.&#39;</span>
+<span class="n">d1</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;d1 result&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>ひとつの遅延オブジェクトを含む、要素がひとつだけのリストから <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> を作りました。
+次のような出力が見られますね。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">One</span> <span class="n">Deferred</span><span class="o">.</span>
+<span class="n">Adding</span> <span class="n">Callback</span><span class="o">.</span>
+<span class="n">Firing</span> <span class="n">d1</span><span class="o">.</span>
+<span class="n">We</span> <span class="n">got</span><span class="p">:</span> <span class="p">[(</span><span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;d1 result&#39;</span><span class="p">)]</span>
+</pre></div>
+</div>
+<p>さらに注意しておきましょう。</p>
+<ul class="simple">
+<li><p>今回は <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> はリスト内で遅延オブジェクトを発火させるまでコールバックを発火しませんでした。</p></li>
+<li><p>結果は依然としてリストですが、ひとつの要素があります。</p></li>
+<li><p>この要素は、ふたつ目の値がリスト内の遅延オブジェクトの結果を表すタプルです。</p></li>
+</ul>
+<p>リストにふたつの遅延オブジェクトを入れてみましょう。
+(<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-1.py#L3">deferred-list/deferred-list-3.py</a>)</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">got_results</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;We got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="nb">print</span> <span class="s1">&#39;Two Deferreds.&#39;</span>
+<span class="n">d1</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d2</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">DeferredList</span><span class="p">([</span><span class="n">d1</span><span class="p">,</span> <span class="n">d2</span><span class="p">])</span>
+<span class="nb">print</span> <span class="s1">&#39;Adding Callback.&#39;</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">got_results</span><span class="p">)</span>
+<span class="nb">print</span> <span class="s1">&#39;Firing d1.&#39;</span>
+<span class="n">d1</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;d1 result&#39;</span><span class="p">)</span>
+<span class="nb">print</span> <span class="s1">&#39;Firing d2.&#39;</span>
+<span class="n">d2</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;d2 result&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>出力は次のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Two</span> <span class="n">Deferreds</span><span class="o">.</span>
+<span class="n">Adding</span> <span class="n">Callback</span><span class="o">.</span>
+<span class="n">Firing</span> <span class="n">d1</span><span class="o">.</span>
+<span class="n">Firing</span> <span class="n">d2</span><span class="o">.</span>
+<span class="n">We</span> <span class="n">got</span><span class="p">:</span> <span class="p">[(</span><span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;d1 result&#39;</span><span class="p">),</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;d2 result&#39;</span><span class="p">)]</span>
+</pre></div>
+</div>
+<p>ここでは、少なくとも私たちが使ってきた方法では、 <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> の結果が、コンストラクタに渡した遅延オブジェクトのリストと同じ個数の要素を持つリストであることがとてもはっきりしています。
+そして、結果のリストの要素は元の遅延オブジェクトの結果を含んでいます。少なくとも遅延オブジェクトが成功した場合は。
+これは、 <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> 自体は元のリストにあった全ての遅延オブジェクトが発火し終わるまで発火しないことを意味します。
+見方を変えると、空のリストから生成された <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> は、待つべき遅延オブジェクトがありませんので、即座に発火します。</p>
+<p>最終的なリストにおける結果の順番はどうなるでしょうか？
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-4.py#L1">deferred-list/deferred-list-4.py</a> について考えましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">got_results</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;We got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="nb">print</span> <span class="s1">&#39;Two Deferreds.&#39;</span>
+<span class="n">d1</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d2</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">DeferredList</span><span class="p">([</span><span class="n">d1</span><span class="p">,</span> <span class="n">d2</span><span class="p">])</span>
+<span class="nb">print</span> <span class="s1">&#39;Adding Callback.&#39;</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">got_results</span><span class="p">)</span>
+<span class="nb">print</span> <span class="s1">&#39;Firing d2.&#39;</span>
+<span class="n">d2</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;d2 result&#39;</span><span class="p">)</span>
+<span class="nb">print</span> <span class="s1">&#39;Firing d1.&#39;</span>
+<span class="n">d1</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;d1 result&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">d2</span></code> を最初に発火させ、それから <code class="docutils literal notranslate"><span class="pre">d1</span></code> を発火させました。
+それでも、 <code class="docutils literal notranslate"><span class="pre">d1</span></code> と <code class="docutils literal notranslate"><span class="pre">d2</span></code> が元の順番を保って遅延オブジェクトのリストが構成されています。
+出力は次の通りです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Two</span> <span class="n">Deferreds</span><span class="o">.</span>
+<span class="n">Adding</span> <span class="n">Callback</span><span class="o">.</span>
+<span class="n">Firing</span> <span class="n">d2</span><span class="o">.</span>
+<span class="n">Firing</span> <span class="n">d1</span><span class="o">.</span>
+<span class="n">We</span> <span class="n">got</span><span class="p">:</span> <span class="p">[(</span><span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;d1 result&#39;</span><span class="p">),</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;d2 result&#39;</span><span class="p">)]</span>
+</pre></div>
+</div>
+<p>出力のリストは元々の遅延オブジェクトのリストと同じ順番で結果を持っています。それぞれの遅延オブジェクトが発火された順番ではありません。
+これはとても素晴らしいことです。
+生成された操作とそれぞれの結果を簡単に関連付けることができますからね
+(たとえば、どの詩がどのサーバから届いたか、など)。</p>
+<p>よし、それでは、リスト内のひとつ以上の遅延オブジェクトが失敗したら何が起きるでしょうか？
+また、 <code class="docutils literal notranslate"><span class="pre">True</span></code> である値はどうなるでしょうか？
+<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-5.py#L1">deferred-list/deferred-list-5.py</a> の例で試してみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">defer</span>
+
+<span class="k">def</span> <span class="nf">got_results</span><span class="p">(</span><span class="n">res</span><span class="p">):</span>
+    <span class="nb">print</span> <span class="s1">&#39;We got:&#39;</span><span class="p">,</span> <span class="n">res</span>
+
+<span class="n">d1</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d2</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">Deferred</span><span class="p">()</span>
+<span class="n">d</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">DeferredList</span><span class="p">([</span><span class="n">d1</span><span class="p">,</span> <span class="n">d2</span><span class="p">],</span> <span class="n">consumeErrors</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="n">got_results</span><span class="p">)</span>
+<span class="nb">print</span> <span class="s1">&#39;Firing d1.&#39;</span>
+<span class="n">d1</span><span class="o">.</span><span class="n">callback</span><span class="p">(</span><span class="s1">&#39;d1 result&#39;</span><span class="p">)</span>
+<span class="nb">print</span> <span class="s1">&#39;Firing d2 with errback.&#39;</span>
+<span class="n">d2</span><span class="o">.</span><span class="n">errback</span><span class="p">(</span><span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;d2 failure&#39;</span><span class="p">))</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">d1</span></code> は通常の結果になるように発火させ、 <code class="docutils literal notranslate"><span class="pre">d2</span></code> はエラーにしています。
+ここでは <code class="docutils literal notranslate"><span class="pre">consumerErrors</span></code> オプションは無視しておいてください。後で見ていきます。
+出力は次のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Firing</span> <span class="n">d1</span><span class="o">.</span>
+<span class="n">Firing</span> <span class="n">d2</span> <span class="k">with</span> <span class="n">errback</span><span class="o">.</span>
+<span class="n">We</span> <span class="n">got</span><span class="p">:</span> <span class="p">[(</span><span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;d1 result&#39;</span><span class="p">),</span> <span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="o">&lt;</span><span class="n">twisted</span><span class="o">.</span><span class="n">python</span><span class="o">.</span><span class="n">failure</span><span class="o">.</span><span class="n">Failure</span> <span class="o">&lt;</span><span class="nb">type</span> <span class="s1">&#39;exceptions.Exception&#39;</span><span class="o">&gt;&gt;</span><span class="p">)]</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">d2</span></code> に対応するタプルの値は、ふたつ目のスロットは <code class="docutils literal notranslate"><span class="pre">Failure</span></code> で、ひとつ目のスロットは <code class="docutils literal notranslate"><span class="pre">False</span></code> です。
+この時点では、 <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> がどのように動作するかは非常に明快でしょう (とはいえ、以下の「議論」にも目を通してくださいね)。</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> は遅延オブジェクトのリストから構築されます。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> は、その結果が与えられたリストと同じ長さのリストである、それ自身が遅延オブジェクトでもあります。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> は元のリストに含まれる全ての遅延オブジェクトが発火した後で、発火します。</p></li>
+<li><p>結果のリストの個別の要素は、元のリストと同じ位置の遅延オブジェクトに対応します。
+遅延オブジェクトが成功した場合の要素は <code class="docutils literal notranslate"><span class="pre">(True,</span> <span class="pre">result)</span></code> であり、失敗した場合は <code class="docutils literal notranslate"><span class="pre">(False,</span> <span class="pre">failure)</span></code> になります。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> は決して失敗しません。何があろうとも個々の遅延オブジェクトの結果はリストに収集されるからです (しかし繰り返しになりますが、以下の「議論」にも目を通してくださいね)。</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> に渡した <code class="docutils literal notranslate"><span class="pre">consumeErrors</span></code> オプションについて考えましょう。
+オプションを渡さないで同じコードを実行させると (<a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-6.py#L1">deferred-list/deferred-list-6.py</a>)、以下の出力を得られます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Firing</span> <span class="n">d1</span><span class="o">.</span>
+<span class="n">Firing</span> <span class="n">d2</span> <span class="k">with</span> <span class="n">errback</span><span class="o">.</span>
+<span class="n">We</span> <span class="n">got</span><span class="p">:</span> <span class="p">[(</span><span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;d1 result&#39;</span><span class="p">),</span> <span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="o">&lt;</span><span class="n">twisted</span><span class="o">.</span><span class="n">python</span><span class="o">.</span><span class="n">failure</span><span class="o">.</span><span class="n">Failure</span> <span class="o">&lt;</span><span class="nb">type</span> <span class="s1">&#39;exceptions.Exception&#39;</span><span class="o">&gt;&gt;</span><span class="p">)]</span>
+<span class="n">Unhandled</span> <span class="n">error</span> <span class="ow">in</span> <span class="n">Deferred</span><span class="p">:</span>
+<span class="n">Traceback</span> <span class="p">(</span><span class="n">most</span> <span class="n">recent</span> <span class="n">call</span> <span class="n">last</span><span class="p">):</span>
+<span class="n">Failure</span><span class="p">:</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">Exception</span><span class="p">:</span> <span class="n">d2</span> <span class="n">failure</span>
+</pre></div>
+</div>
+<p>もし思い出せるなら、”Unhandled error in Deferred” というメッセージは、遅延オブジェクトがゴミ回収され (原文: garbage collected) 遅延オブジェクト内の最後のコールバックが失敗したときに生成されます。
+このメッセージは、プログラムにある全ての潜在的な非同期の失敗を捕まえていなかった、ということを教えてくれます。
+ではここでの例だと、その失敗はどこからやってきたのでしょうか？
+<code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> からでないことは明らかです。成功しますから。
+ということで、 <code class="docutils literal notranslate"><span class="pre">d2</span></code> からに違いありません。</p>
+<p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> は監視しているそれぞれの遅延オブジェクトがいつ発火するかを知る必要があります。
+<code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> は他と変わらない方法でこれを実行します。それぞれの遅延オブジェクトにコールバックとエラー用コールバックを付与します。
+デフォルトでは、コールバック (エラー用コールバックも) は最終的なリストに結果を詰め込んだ後で、元の結果 (もしくは失敗) を返します。
+エラー用コールバックから元の失敗を返すと次のエラー用コールバックを発動させることになりますので、 <code class="docutils literal notranslate"><span class="pre">d2</span></code> は発火後にも失敗した状態のままなのです。</p>
+<p>しかし <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> に <code class="docutils literal notranslate"><span class="pre">consumeErrors=True</span></code> を渡すと、個々の遅延オブジェクトに対して <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> が追加したエラー用コールバックは、
+失敗の代わりに <code class="docutils literal notranslate"><span class="pre">None</span></code> を返します。
+したがって、エラーを消費し (“consuming”)、警告メッセージを取り除きます。
+また、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/deferred-list/deferred-list-7.py#L1">deferred-list/deferred-list-7.py</a> にあるように、 <code class="docutils literal notranslate"><span class="pre">d2</span></code> に独自のエラー用コールバックを付け足すことでエラーを処理することもできます。</p>
+</div>
+<div class="section" id="id3">
+<h2>クライアント 8.0<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>バージョン 8.0 の Get Poetry Now! クライアントは、全ての詩が完了 (あるいは失敗) したときを判別するために <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> を使います。
+新しいクライアントは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L1">twisted-client-8/get-poetry.py</a> にあります。
+繰り返しになりますが、変更箇所は <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-8/get-poetry.py#L151">poetry_main</a> にしかありません。
+重要な変更部分を見ていきましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">...</span>
+<span class="n">ds</span> <span class="o">=</span> <span class="p">[]</span>
+
+<span class="k">for</span> <span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span> <span class="ow">in</span> <span class="n">addresses</span><span class="p">:</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">get_transformed_poem</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+    <span class="n">d</span><span class="o">.</span><span class="n">addCallbacks</span><span class="p">(</span><span class="n">got_poem</span><span class="p">)</span>
+    <span class="n">ds</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+
+<span class="n">dlist</span> <span class="o">=</span> <span class="n">defer</span><span class="o">.</span><span class="n">DeferredList</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="n">consumeErrors</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">dlist</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="k">lambda</span> <span class="n">res</span> <span class="p">:</span> <span class="n">reactor</span><span class="o">.</span><span class="n">stop</span><span class="p">())</span>
+</pre></div>
+</div>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-client-7/get-poetry.py#L180">client 7.0</a> の同じセクションと比較したくなるかもしれませんね。</p>
+<p>クライアント 8.0 では <code class="docutils literal notranslate"><span class="pre">poem_done</span></code> コールバックも <code class="docutils literal notranslate"><span class="pre">results</span></code> リストも必要ありません。
+その代わりに <code class="docutils literal notranslate"><span class="pre">get_transformed_poem</span></code> から受け取ったそれぞれの遅延オブジェクトをリスト (<code class="docutils literal notranslate"><span class="pre">ds</span></code>) に入れて、 <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> を生成します。
+<code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> は全ての詩に対する処理が完了するまで発火しませんので、reactor を停止させるために <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> にコールバックを追加します。
+今回は <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> の結果を使っていません。 すべてが完了したことを知りたいだけなのです。
+これだけです！</p>
+</div>
+<div class="section" id="id4">
+<h2>議論<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>図37に、 <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> がどのように動作するかを示します。</p>
+<div class="figure align-default" id="id7">
+<span id="figure37"></span><img alt="_images/p18_deferred-list.png" src="_images/p18_deferred-list.png" />
+<p class="caption"><span class="caption-text">図37：DeferredList の結果</span><a class="headerlink" href="#id7" title="Permalink to this image">¶</a></p>
+</div>
+<p>非常にシンプルですね。
+<code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> にはここで触れていないオプションがいくつかあり、それによって上述の振る舞いを変えることができます。
+これは文末の「おすすめの練習問題」であなたが追求していってください。</p>
+<p>次のパート (“<a class="reference internal" href="p19.html"><span class="doc">パート19: 欲しいと思っていても考えを改めると</span></a>”) では <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスのもうひとつの機能をおさえておきましょう。
+これは Twisted 10.1.0、つまり比較的最近になって導入された機能です。</p>
+<div class="section" id="id5">
+<h3>おすすめの練習問題<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> の <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-10.1.0/twisted/internet/defer.py#5933">ソースコード</a> を読んでみてください。</p></li>
+<li><p>コンストラクタの <code class="docutils literal notranslate"><span class="pre">fireOnOneCallback</span></code> と <code class="docutils literal notranslate"><span class="pre">fireOnOneErrback</span></code> オプション引数を試してみられるように <cite>deferred-list</cite> の例を修正してください。
+どちらか片方 (もしくは両方) を使うようなシナリオに合わせてみましょう。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> のリストを使って <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> を作成できますか？
+可能な場合は、その結果はどのように見えるでしょうか？</p></li>
+<li><p>全ての詩をダウンロードし終えるまで何も出力しないようにクライアント 8.0 を修正してください。
+今回は <code class="docutils literal notranslate"><span class="pre">DeferredList</span></code> からの結果を使うことになるでしょう。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DeferredDict</span></code> の意味を定義して、それを実装してください。</p></li>
+</ul>
+</div>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p17.html">パート17: 「コールバック」ではない方法</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p19.html">パート19: 欲しいと思っていても考えを改めると</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>

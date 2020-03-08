@@ -1,0 +1,306 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>パート14: Deferred が無かったら &#8212; Twisted Intro</title>
+    <link rel="stylesheet" href="_static/haiku.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="パート15: テストされた詩" href="p15.html" />
+    <link rel="prev" title="パート13: Deferred と行こう" href="p13.html" /> 
+  </head><body>
+      <div class="header" role="banner"><h1 class="heading"><a href="index.html">
+          <span>Twisted Intro</span></a></h1>
+        <h2 class="heading"><span>パート14: Deferred が無かったら</span></h2>
+      </div>
+      <div class="topnav" role="navigation" aria-label="top navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p13.html">パート13: Deferred と行こう</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p15.html">パート15: テストされた詩</a>&#160;&#160;»
+        </p>
+
+      </div>
+      <div class="content" role="main">
+        
+        
+  <div class="section" id="deferred">
+<h1>パート14: Deferred が無かったら<a class="headerlink" href="#deferred" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="id1">
+<h2>はじめに<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>このパートでは <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスの違う一面を学んでいきましょう。
+議論を盛り上げるため、詩に関連したサービスにサーバをもうひとつ追加します。
+外部の同じサーバから詩を取得したがっている内部的なクライアントがたくさんあると仮定してください。
+しかし、この外部のサーバは遅く、インターネット越しの膨大な要求によってすでに過負荷になっています。
+クライアントをさらに増やして可愛そうなサーバの問題を増長させたくはありません。</p>
+<p>その代わりにキャッシュプロキシサーバを作ってみましょう。
+クライアントがプロキシに接続すると、プロキシは外部のサーバから詩を取得するか以前に取得したキャッシュコピーを返します。
+すべてのクライアントをプロキシに向けると外部サーバへの負荷を抑えられます。
+図30にこの設定を示します。</p>
+<div class="figure align-default" id="id10">
+<span id="figure30"></span><img alt="_images/p14_proxy1.png" src="_images/p14_proxy1.png" />
+<p class="caption"><span class="caption-text">図３０：キャッシュするプロキシサーバ</span><a class="headerlink" href="#id10" title="Permalink to this image">¶</a></p>
+</div>
+<p>クライアントが詩を取得するためにプロキシに接続すると何が起こるかを考えてみてください。
+キャッシュが空の場合にはプロキシは (非同期に) 外部サーバからの応答を待たなくてはなりません。詩を送り返すのはその後です。
+幸いにして、私たちは遅延オブジェクトを返す非同期関数を使ってこの状況を処理する方法を知っています。
+とはいえ、キャッシュに詩がすでに存在していると、プロキシは即座にそれを送り返せます。待つ必要がありません。
+このため、プロキシが詩を取得する内部機構は時として非同期であり、同期にもなりえるのです。</p>
+<p>それでは、非同期でしかない関数しかなかったらどうすれば良いのでしょうか？
+Twisted はふたつのオプションを提供しており、どちらも <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスでこれまで使ってこなかった機能に依存しています。
+呼び出し側に戻す「前」に遅延オブジェクトを発火させてしまうことです。</p>
+<p>遅延オブジェクトを二回は発火できませんが、発火された後でもコールバックとエラー用コールバックを追加できますので、これは機能します。
+こうすると、単純に遅延オブジェクトはコールバックチェーンを続けていきます。
+ひとつ大事なこととしては、発火済みの遅延オブジェクトは新しいコールバック (もしくはエラー用コールバックであり、遅延オブジェクトの状態に依ります) をすぐさま発火させるかもしれない、ということです。
+つまり、コールバックを追加した瞬間にです。</p>
+<p>発火済みの遅延オブジェクトを表す図31について考えてみましょう。</p>
+<div class="figure align-default" id="id11">
+<span id="figure31"></span><img alt="_images/p14_deferred-13.png" src="_images/p14_deferred-13.png" />
+<p class="caption"><span class="caption-text">図３１：発火された遅延オブジェクト</span><a class="headerlink" href="#id11" title="Permalink to this image">¶</a></p>
+</div>
+<p>この時点でもうひとつのコールバックとエラー用コールバックのペアを付け足していたとすれば、遅延オブジェクトはすぐさまコールバックを発火させるでしょう。この様子を図32に示します。</p>
+<div class="figure align-default" id="id12">
+<span id="figure32"></span><img alt="_images/p14_deferred-14.png" src="_images/p14_deferred-14.png" />
+<p class="caption"><span class="caption-text">図３２：新しいコールバックを持つ同じ遅延オブジェクト</span><a class="headerlink" href="#id12" title="Permalink to this image">¶</a></p>
+</div>
+<p>ひとつ前のコールバックは成功しますので、このコールバック (エラー用コールバックではありません) は発火されます。
+もしも失敗したら (Exception を送り出すか Failure を返した場合) 、新しいエラー用コールバックが呼び出されるでしょう。</p>
+<p><a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-11.py#L1">twisted-deferred/defer-11.py</a> にある例でこの新機能を確認できます。
+スクリプトを読んで実行してみてください。遅延オブジェクトを発火させてからコールバックを付け足したときに、それがどのように振舞うかを理解できるでしょう。
+最初の例では、新しいコールバックそれぞれが即座に呼び出されていた方法に注意しましょう。(<code class="docutils literal notranslate"><span class="pre">print</span></code> が出力する順番で分かります)</p>
+<p>スクリプトのふたつ目の例は、コールバックをすぐには発火しないことで、遅延オブジェクトを <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L272">pause()</a> できる方法を教えてくれます。
+コールバックを発火する準備が整ったら <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L278">unpause()</a> を呼び出します。
+これこそが Deferred のコールバックが自分ではない遅延オブジェクトを返したときに、自分自身を一時停止させる方法なのです。
+素晴らしいですね！</p>
+</div>
+<div class="section" id="id2">
+<h2>プロキシ 1.0<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>それでは <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/poetry-proxy.py#L1">twisted-server-1/poetry-proxy.py</a> にある詩のプロキシの最初のバージョンを見てみましょう。
+プロキシはクライアントとしてもサーバとしても動作しますので、プロトコルクラスとファクトリクラスのふたつのペアを持ちます。
+ひとつは詩を提供するためであり、もうひとつは外部サーバから詩を取得するためです。
+クライアントのペアのためのコードを見ておく必要はないでしょう。ひとつ前の詩のクライアントと一緒だからです。</p>
+<p>とはいえサーバのペアを見る前に、 <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/poetry-proxy.py#L100">ProxyService</a> に目を通しておきましょう。
+これは詩を取得するためのサーバ側のプロトコルです。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">ProxyService</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="n">poem</span> <span class="o">=</span> <span class="kc">None</span> <span class="c1"># the cached poem</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">host</span> <span class="o">=</span> <span class="n">host</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">port</span> <span class="o">=</span> <span class="n">port</span>
+
+    <span class="k">def</span> <span class="nf">get_poem</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">poem</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">print</span> <span class="s1">&#39;Using cached poem.&#39;</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">poem</span>
+
+        <span class="nb">print</span> <span class="s1">&#39;Fetching poem from server.&#39;</span>
+        <span class="n">factory</span> <span class="o">=</span> <span class="n">PoetryClientFactory</span><span class="p">()</span>
+        <span class="n">factory</span><span class="o">.</span><span class="n">deferred</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">set_poem</span><span class="p">)</span>
+        <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+        <span class="n">reactor</span><span class="o">.</span><span class="n">connectTCP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">host</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="n">factory</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">factory</span><span class="o">.</span><span class="n">deferred</span>
+
+    <span class="k">def</span> <span class="nf">set_poem</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">poem</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">poem</span> <span class="o">=</span> <span class="n">poem</span>
+        <span class="k">return</span> <span class="n">poem</span>
+</pre></div>
+</div>
+<p>ここで大事なメソッドは <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> です。
+すでにキャッシュに詩があれば、その詩を返すだけです。
+キャッシュになければ外部サーバへの接続を初期化し、詩が返されたら発火する遅延オブジェクトを返します。
+このため <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> はたまにしか非同期でない関数といえます。</p>
+<p>このような関数をどうやって扱いましょうか？
+サーバサイドにある <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-1/poetry-proxy.py#L52">protocol/factory</a> のペアを見てみましょう。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryProxyProtocol</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">connectionMade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">maybeDeferred</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">service</span><span class="o">.</span><span class="n">get_poem</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">write</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addBoth</span><span class="p">(</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">loseConnection</span><span class="p">())</span>
+
+<span class="k">class</span> <span class="nc">PoetryProxyFactory</span><span class="p">(</span><span class="n">ServerFactory</span><span class="p">):</span>
+
+    <span class="n">protocol</span> <span class="o">=</span> <span class="n">PoetryProxyProtocol</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">service</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">service</span> <span class="o">=</span> <span class="n">service</span>
+</pre></div>
+</div>
+<p>ファクトリはそのままですね。
+プロトコルインスタンスが <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> メソッドを呼び出せるようにプロキシサービスの参照を保存しておくだけです。
+プロトコルが肝心の部分です。
+プロトコルは  <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> を直接呼び出す代わりに、 <code class="docutils literal notranslate"><span class="pre">twisted.internet.defer</span></code> モジュールにある <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L84">maybeDeferred</a> という名前のラッパー関数を使います。</p>
+<p><code class="docutils literal notranslate"><span class="pre">maybeDeferred</span></code> 関数は、異なる関数への参照とそれに渡すオプション引数 (この例では使いません) を受け取ります。
+<code class="docutils literal notranslate"><span class="pre">maybeDeferred</span></code> は実際にその関数を呼び出し、次のいずれかの振る舞いをします。</p>
+<ul class="simple">
+<li><p>関数が遅延オブジェクトを返したら、 <code class="docutils literal notranslate"><span class="pre">maybeDeferred</span></code> はその遅延オブジェクトを返します。</p></li>
+<li><p>関数が失敗を返したら、 <code class="docutils literal notranslate"><span class="pre">maybeDeferred</span></code> はその失敗で発火された (<code class="docutils literal notranslate"><span class="pre">errback</span></code> で) 新しい遅延オブジェクトを返します。</p></li>
+<li><p>関数が通常の値を返したら、 <code class="docutils literal notranslate"><span class="pre">maybeDeferred</span></code> はその値で発火された遅延オブジェクトを返します。</p></li>
+<li><p>関数が例外を送出したら、 <code class="docutils literal notranslate"><span class="pre">maybeDeferred</span></code> は例外をラップした Failure で発火された (<code class="docutils literal notranslate"><span class="pre">errback</span></code> で) 遅延オブジェクトを返します。</p></li>
+</ul>
+<p>言い換えると、あなたが渡した関数が決して遅延オブジェクトを返さないものであったとしても、 <code class="docutils literal notranslate"><span class="pre">maybeDeferred</span></code> の戻り値は遅延オブジェクトであることが保証されています。
+これによって安全に (例外によって失敗したものでも) 同期関数を呼び出すことができ、遅延オブジェクトを返す非同期関数のように扱うことができます。</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>ノート 1:</dt><dd><p>それでも、わすかな違いがあるでしょう。同期関数が返す遅延オブジェクトは発火済みですので、いかなるコールバックもエラー用コールバックもすぐに実行されます。reactor ループの将来的な繰り返しには入りません。</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>ノート 2:</dt><dd><p>あと知恵になりますが、いつも遅延オブジェクトを返す関数を “maybeDeferred” と名付けたことは最善ではありません。しかし、このまま進みます。</p>
+</dd>
+</dl>
+</li>
+</ul>
+<p>プロトコルが遅延オブジェクトを使える状態になると、詩をクライアントに送って接続を閉じるようなコールバックをいくつか追加できます。
+私たちの詩の最初のプロキシにぴったりですね！</p>
+</div>
+<div class="section" id="id3">
+<h2>プロキシを実行する<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>プロキシを試してみるには、次のようにして詩のサーバを起動しておきます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">fastpoetry</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10001</span> <span class="n">poetry</span><span class="o">/</span><span class="n">fascination</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p>そしてプロキシサーバを起動させます。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">server</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="n">poetry</span><span class="o">-</span><span class="n">proxy</span><span class="o">.</span><span class="n">py</span> <span class="o">--</span><span class="n">port</span> <span class="mi">10000</span> <span class="mi">10001</span>
+</pre></div>
+</div>
+<p>これで10001番ポートの詩のサーバを10000番ポートでプロキシしてくれるようになります。
+ということで、クライアントにはプロキシを指定します。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">twisted</span><span class="o">-</span><span class="n">client</span><span class="o">-</span><span class="mi">4</span><span class="o">/</span><span class="n">get</span><span class="o">-</span><span class="n">poetry</span><span class="o">.</span><span class="n">py</span> <span class="mi">10000</span>
+</pre></div>
+</div>
+<p>詩の変換に関知しないクライアントも使えます。
+クライアントのウィンドウには詩が表示され、プロキシのウィンドウにはサーバから詩を取得していることを表すテキストを確認できるでしょう。
+もう一度クライアントを動かせてみると、プロキシはキャッシュにある詩を使っていることを確認できます。もちろん、クライアントは前回と同じ詩を表示します。</p>
+</div>
+<div class="section" id="id4">
+<h2>プロキシ 2.0<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>以前も言及したように、同じスキームを実現するもうひとつの方法があります。
+これは Poetry Proxy 2.0 として <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L1">twisted-server-2/poetry-proxy.py</a> にあります。
+遅延オブジェクトを戻り値として返す前に発火させることができますので、詩がキャッシュに見つかった場合は、プロキシサービスに発火済みの遅延オブジェクトを返させるのです。
+プロキシサービスの <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L108">get_poem</a> メソッドの新バージョンは次のようになります。</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">get_poem</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">poem</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">print</span> <span class="s1">&#39;Using cached poem.&#39;</span>
+        <span class="c1"># return an already-fired deferred</span>
+        <span class="k">return</span> <span class="n">succeed</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">poem</span><span class="p">)</span>
+
+    <span class="nb">print</span> <span class="s1">&#39;Fetching poem from server.&#39;</span>
+    <span class="n">factory</span> <span class="o">=</span> <span class="n">PoetryClientFactory</span><span class="p">()</span>
+    <span class="n">factory</span><span class="o">.</span><span class="n">deferred</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">set_poem</span><span class="p">)</span>
+    <span class="kn">from</span> <span class="nn">twisted.internet</span> <span class="kn">import</span> <span class="n">reactor</span>
+    <span class="n">reactor</span><span class="o">.</span><span class="n">connectTCP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">host</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="n">factory</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">factory</span><span class="o">.</span><span class="n">deferred</span>
+</pre></div>
+</div>
+<p><a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L30">defer.succeed</a> 関数は、
+与えられた結果から発火済み遅延オブジェクトを生成する簡単な方法です。
+関数の実装を読んでみると、新しい遅延オブジェクトを生成してそれに <code class="docutils literal notranslate"><span class="pre">.callback</span></code> を実行しているだけであることが分かるでしょう。
+なお、失敗として発火済みの遅延オブジェクトが欲しい場合には <a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L52">defer.fail</a> を使えます。</p>
+<p>このバージョンでは <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> はいつも遅延オブジェクトを返しますので、もはや <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-server-2/poetry-proxy.py#L52">プロトコルクラス</a> は <code class="docutils literal notranslate"><span class="pre">maybeDeferred</span></code> を使う必要がありません。
+(先ほど学んだように、それを使い続けても動きます)</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">PoetryProxyProtocol</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">connectionMade</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">factory</span><span class="o">.</span><span class="n">service</span><span class="o">.</span><span class="n">get_poem</span><span class="p">()</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addCallback</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">write</span><span class="p">)</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">addBoth</span><span class="p">(</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">transport</span><span class="o">.</span><span class="n">loseConnection</span><span class="p">())</span>
+</pre></div>
+</div>
+<p>ふたつの変更を除けば、プロキシのセカンドバージョンはファーストにそっくりです。
+そして、元のバージョンと同じ方法で実行できます。</p>
+</div>
+<div class="section" id="id6">
+<h2>まとめ<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>このパートでは遅延オブジェクトが返される前にどのようにして発火されることがあるかを学びました。
+これによって、同期 (もしくはたまに同期) コードで使うことができます。
+実現方法はふたつあります。</p>
+<ul class="simple">
+<li><p>遅延オブジェクトを返したり普通の値を返したりする (もしくは例外を投げる) 関数を扱うために <code class="docutils literal notranslate"><span class="pre">maybeDeferred</span></code> を使います。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">defer.succeed</span></code> と <code class="docutils literal notranslate"><span class="pre">defer.fail</span></code> を使って自分自身の遅延オブジェクトを予め発火させることができます。これにより、半同期関数は値に関係なくいつも遅延オブジェクトを返します。</p></li>
+</ul>
+<p>どちらを選択するかは我々次第です。
+ひとつ目の方法は私たちの関数がいつも非同期であるとは限らないことを強調し、もうひとつの方法はクライアントのコードを簡潔にします。
+おそらく、どちらかを選ぶのに決定的となる主張もないでしょう。</p>
+<p>発火後でもコールバックとエラー用コールバックを遅延オブジェクトに追加できますので、両方のテクニックを使えます。
+これは”<a class="reference internal" href="p09.html"><span class="doc">パート9: Deferred 再入門</span></a>”と <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-unhandled.py#L1">twisted-deferred/defer-unhandled.py</a>
+の例で発見した興味深いことを説明してくれます。
+遅延オブジェクトにおける「処理されない例外」 (最後のコールバックかエラー用コールバックのどちらかが失敗したときに発生します) はガベージコレクトされるまでレポートされない、ということを学びました (つまり、ユーザーコードからは参照されていません) 。
+しかし今ではその理由が分かります。
+そのようなエラーを処理するコールバックのペアを遅延オブジェクトにいつでも追加できますので、
+Twisted が「そのエラーは処理されなかった」と言うまで、遅延オブジェクトに対する最後の参照が無くなってしまうことはありません。</p>
+<blockquote>
+<div><p><code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラス (<cite>twisted.internet</cite> パッケージにあります) の探求に多くの時間を使ってきましたが、実はインターネットとは関係ないことに気付いたかもしれません。
+コールバックを管理するための抽象化なのです。そこでは何が行われているのでしょうか？
+それこそ Twisted が形作られてきた歴史なのです。
+考えられる最善の言葉 (World Ultimate Frisbee League でプレイするために何百万ドルも払わされるような場合ですが) を挙げるなら、 <code class="docutils literal notranslate"><span class="pre">defer</span></code> モジュールは <code class="docutils literal notranslate"><span class="pre">twisted.python</span></code> にあるべきでしょう。
+もちろん、そのような世界では超越した力が働く犯罪と戦うのに忙しすぎて、この入門文書を読めないかもしれません。
+まぁ、それも人生でしょう。 (<a class="reference external" href="http://www.youtube.com/watch?v=KIiUqfxFttM">that’s life</a>)</p>
+</div></blockquote>
+<p>さあ、これで遅延オブジェクトについては万全ですか？
+ようやく全ての機能を理解できたのでしょうか？
+少し前まではこれが基本的なケースでした。
+しかし、Twisted の開発者たちは新しい機能を追加してきました。
+Twisted 10 のリリースから、 <code class="docutils literal notranslate"><span class="pre">Deferred</span></code> クラスは全く新しいことができます。
+これは後々のパートで紹介するとして、遅延オブジェクトからちょっと離れて、”<a class="reference internal" href="p15.html"><span class="doc">パート15: テストされた詩</span></a>”ではテスト方法も含めた Twisted の他の側面にも目を向けてみましょう。</p>
+</div>
+<div class="section" id="id7">
+<h2>おすすめの練習問題<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic">
+<li><p><code class="docutils literal notranslate"><span class="pre">.errback()</span></code> を使って予め失敗した遅延オブジェクトを表現するように <a class="reference external" href="http://github.com/jdavisp3/twisted-intro/blob/master/twisted-deferred/defer-11.py#L1">twisted-deferred/defer-11.py</a> の例を修正してみましょう。
+<a class="reference external" href="http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/internet/defer.py#L52">defer.fail</a> のドキュメントと実装を読んでみてください。</p></li>
+<li><p>二時間以上前にキャッシュされた詩は破棄するように、プロキシを修正してみましょう。その詩への次のリクエストはサーバからの再リクエストになります。</p></li>
+<li><p>プロキシはサーバと二回以上やり取りするのを避けるようにすべきです。
+しかし、キャッシュに詩が存在しないときに複数のクライアントが同時にリクエストを送ると、プロキシは複数のリクエストを生成することになるでしょう。
+スローサーバを使えば簡単に確認できます。</p>
+<blockquote>
+<div><p>リクエストをひとつしか生成しないようにプロキシサービスを修正しましょう。
+今のところ、サービスはふたつの状態しか持ちません。
+詩がキャッシュにあるかないかだけです。
+リクエストを生成したものの完了していないことを表す、三つ目の状態を認識させる必要があるでしょう。
+三つ目の状態で <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> メソッドが呼ばれたら、 “<cite>waiters</cite>” リストに遅延オブジェクトを追加します。
+新しい遅延オブジェクトは <code class="docutils literal notranslate"><span class="pre">get_poem</span></code> メソッドの結果になるでしょう。
+最終的に詩が返されると、待っていた全ての遅延オブジェクトにその詩を渡して発火させて、キャッシュした状態に遷移します。
+逆に詩の取得に失敗した場合は、待っていた全ての遅延オブジェクトの <code class="docutils literal notranslate"><span class="pre">.errback()</span></code> メソッドを発火させ、キャッシュが存在しない状態に遷移します。</p>
+</div></blockquote>
+</li>
+<li><p>プロキシサービスに変換プロキシを追加してみましょう。
+このサービスは元の変換サービスのように動作すべきです。
+しかし、変換処理自体には外部サーバを使います。</p></li>
+</ol>
+</div>
+</div>
+
+
+      </div>
+      <div class="bottomnav" role="navigation" aria-label="bottom navigation">
+      
+        <p>
+        «&#160;&#160;<a href="p13.html">パート13: Deferred と行こう</a>
+        &#160;&#160;::&#160;&#160;
+        <a class="uplink" href="index.html">Contents</a>
+        &#160;&#160;::&#160;&#160;
+        <a href="p15.html">パート15: テストされた詩</a>&#160;&#160;»
+        </p>
+
+      </div>
+
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2010, Shigeru Kitazaki.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 2.4.4.
+    </div>
+  </body>
+</html>
